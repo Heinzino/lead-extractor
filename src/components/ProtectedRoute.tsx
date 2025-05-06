@@ -1,19 +1,20 @@
-"use client";
-import { useRouter } from 'next/router';
+'use client';
 import { useEffect, JSX } from 'react';
+import { useRouter } from 'next/router';
 import { useAuth } from '../context/AuthContext';
 
 export function ProtectedRoute({ children }: { children: JSX.Element }) {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const router = useRouter();
+  console.log('user', user);
 
   useEffect(() => {
-    if (user === null) {
+    if (!loading && user === null) {
       router.push('/login');
     }
-  }, [user, router]);
+  }, [user, loading, router]);
 
-  if (!user) return <p>Loading...</p>;
+  if (loading) return <p>Loading...</p>;
 
   return children;
 }
