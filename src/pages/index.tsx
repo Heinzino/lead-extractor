@@ -1,12 +1,33 @@
 "use client";
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase/supabaseClient';
-import type { Database } from '@/types/supabase'; // path may vary
+import type { Database } from '@/types/supabase'; 
+import Results from '@/components/Results';
+import BusinessFinder from '@/components/BusinessFinder';
+import ContactFinder from '@/components/ContactFinder';
+import Settings from '@/components/Settings';
+import Sidebar from '@/components/Sidebar';
 
 type TestRow = Database['public']['Tables']['test']['Row'];
 
 export default function Home() {
   const [data, setData] = useState<TestRow[]>([]);
+  const [activePage, setActivePage] = useState<string>('Results');
+
+  const renderActivePage = () => {
+    switch (activePage) {
+      case 'Results':
+        return <Results />;
+      case 'Business Finder':
+        return <BusinessFinder />;
+      case 'Contact Finder':
+        return <ContactFinder />;
+      case 'Settings':
+        return <Settings />;
+      default:
+        return <Results />;
+    }
+  };
 
   useEffect(() => {
     const fetchTestData = async () => {
@@ -21,13 +42,11 @@ export default function Home() {
   }, []);
 
   return (
-    <div>
-      <h1>Supabase Test Data</h1>
-      <ul>
-        {data.map((item) => (
-          <li key={item.id}>{item.name}</li>
-        ))}
-      </ul>
+    <div className="flex">
+      <Sidebar setActivePage={setActivePage} />
+      <div className="flex-1 p-8 bg-gray-900 text-white">
+        {renderActivePage()}
+      </div>
     </div>
   );
 }
