@@ -45,8 +45,8 @@ export default function Sidebar({ setActivePage }: { setActivePage: (page: strin
             <button
               key={item.title}
               onClick={() => handleNavigation(item.title)}
-              className={`flex items-center space-x-4 p-3 rounded-lg hover:bg-whiteIce hover:text-black hover:cursor-pointer ${
-                activePage === item.title ? 'bg-whiteIce text-black' : ''
+              className={`flex items-center space-x-4 p-3 rounded-lg hover:bg-gray-800 hover:text-sky-400 hover:cursor-pointer ${
+                activePage === item.title ? 'bg-gray-800 text-sky-400' : ''
               }`}
             >
               {item.icon}
