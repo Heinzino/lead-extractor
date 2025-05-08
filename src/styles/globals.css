@@ -23,6 +23,11 @@ body {
     animation: fade-in-up 0.3s ease-out forwards;
   }
   
+  .special-hover-shadow:hover {
+    box-shadow: 0 0 0 4px #009bde4d;
+  }
+  
+
 /* Using this janky solution for custom colors bc tailwind config file not cooperating */
 
 /* darkBlue: #09031e */

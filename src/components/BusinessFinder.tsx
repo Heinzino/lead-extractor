@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { Upload, X, Download, FileText } from 'lucide-react';
+import Button from './Button';
 import Spinner from './Spinner';
 import Toast from './Toast';
 
@@ -69,9 +70,10 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
   }, []);
 
   const downloadSampleFile = useCallback(() => {
-    setToastMessage('Sample file downloaded');
-    setToastType('success');
-    setShowToast(true);
+    const link = document.createElement('a');
+    link.href = '/sample-bf-input.csv';
+    link.download = 'sample-bf-input.csv';
+    link.click();
   }, []);
 
   const handleSubmit = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
@@ -113,7 +115,7 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
   }, []);
 
   return (
-    <div className="w-full mx-auto p-4 md:p-6">
+    <div className="w-full mx-auto p-4 md:px-6 md:pt-4 md:pb-6">
       {showToast && (
         <Toast 
           message={toastMessage} 
@@ -135,7 +137,7 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
         <div className="space-y-3">
           <label 
             htmlFor="file-upload" 
-            className="block text-sm font-medium text-gray-500"
+            className="block text-sm text-gray-500"
           >
             Upload CSV File
           </label>
@@ -157,7 +159,7 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
             {isUploading ? (
               <div className="py-4">
                 <Spinner />
-                <p className="mt-3 text-sm font-medium text-blue-600">Uploading...</p>
+                <p className="mt-3 text-sm text-blue-600">Uploading...</p>
               </div>
             ) : (
               <>
@@ -167,7 +169,7 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
                     strokeWidth={1.5}
                   />
                 </div>
-                <p className="text-sm font-medium text-gray-600 mb-1">
+                <p className="text-sm text-gray-500 mb-1">
                   {isDragging ? 'Drop your CSV file here' : 'Drag and drop your CSV file here'}
                 </p>
                 <p className="text-xs text-gray-500">
@@ -194,7 +196,7 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
                   <FileText className="w-6 h-6 text-blue-500" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-800">{file.name}</p>
+                  <p className="text-sm text-gray-800">{file.name}</p>
                   <p className="text-xs text-gray-500">
                     {(file.size / 1024).toFixed(2)} KB
                   </p>
@@ -204,14 +206,14 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
                 <button
                   type="button"
                   onClick={() => window.open(URL.createObjectURL(file))}
-                  className="p-2 text-gray-500 hover:text-blue-600 transition-colors rounded-full hover:bg-blue-50"
+                  className="p-2 text-gray-500 hover:text-accentBlue hover:cursor-pointer transition-colors rounded-full hover:border"
                 >
                   <Download className="w-5 h-5" />
                 </button>
                 <button
                   type="button"
                   onClick={removeFile}
-                  className="p-2 text-gray-500 hover:text-red-500 transition-colors rounded-full hover:bg-red-50"
+                  className="p-2 text-gray-500 hover:text-red-500 transition-colors rounded-full hover:border hover:cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -224,7 +226,7 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
           <button
             type="button"
             onClick={downloadSampleFile}
-            className="text-darkBlue font-medium flex items-center hover:underline hover:cursor-pointer"
+            className="text-darkBlue flex items-center hover:underline hover:cursor-pointer"
           >
             <Download className="w-4 h-4 mr-1" />
             Download Sample File
@@ -235,7 +237,7 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
           <div>
             <label 
               htmlFor="job-titles" 
-              className="block text-sm font-medium text-gray-500 mb-2"
+              className="block text-sm text-gray-500 mb-2"
             >
               What job titles would you like to search for?
             </label>
@@ -255,7 +257,7 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
           <div>
             <label 
               htmlFor="file-name" 
-              className="block text-sm font-medium text-gray-500 mb-2"
+              className="block text-sm text-gray-500 mb-2"
             >
               What do you want to name your file?
             </label>
@@ -271,27 +273,12 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
         </div>
 
         <div className="pt-2">
-          <button
-            type="button"
+          <Button
+            text="Enrich"
             onClick={handleSubmit}
             disabled={isEnriching || !file}
-            className={`
-              w-full md:w-auto px-6 py-3 rounded-lg font-medium text-white
-              ${isEnriching || !file 
-                ? 'bg-gray-300 cursor-not-allowed' 
-                : 'bg-blue-600 hover:bg-blue-700 shadow-md hover:shadow-lg'}
-              transition-all duration-200 flex items-center justify-center
-            `}
-          >
-            {isEnriching ? (
-              <>
-                <Spinner /> 
-                Enriching...
-              </>
-            ) : (
-              'Enrich'
-            )}
-          </button>
+            isLoading={isEnriching}
+          />
         </div>
       </div>
     </div>
