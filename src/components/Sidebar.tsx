@@ -21,9 +21,7 @@ export default function Sidebar({ setActivePage }: { setActivePage: (page: strin
 
   return (
     <div className={`flex ${isSidebarOpen ? 'w-80' : 'w-20'} transition-width duration-300 bg-darkBlue text-white h-screen`}>
-      {/* Sidebar Content */}
       <div className={`flex flex-col w-full ${isSidebarOpen ? 'p-6' : 'p-3'}`}>
-        {/* App Name & Arrow Toggle */}
         <div className="flex items-center justify-between">
 
           {isSidebarOpen && <div className='flex items-center gap-4'>
@@ -39,7 +37,6 @@ export default function Sidebar({ setActivePage }: { setActivePage: (page: strin
           </button>
         </div>
 
-        {/* Sidebar Navigation */}
         <nav className="mt-8 flex flex-col space-y-4">
           {sidebarItems.map((item) => (
             <button
