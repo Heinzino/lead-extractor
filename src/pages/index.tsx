@@ -42,9 +42,9 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="flex">
+    <div className="flex h-screen">
       <Sidebar setActivePage={setActivePage} />
-      <div className="flex-1 p-8 bg-gray-900 text-white">
+      <div className="flex-1 p-8 bg-white overflow-y-auto">
         {renderActivePage()}
       </div>
     </div>

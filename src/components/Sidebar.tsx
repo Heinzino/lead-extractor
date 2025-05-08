@@ -20,12 +20,16 @@ export default function Sidebar({ setActivePage }: { setActivePage: (page: strin
   };
 
   return (
-    <div className={`flex ${isSidebarOpen ? 'w-64' : 'w-20'} transition-width duration-300 bg-gray-800 text-white h-screen`}>
+    <div className={`flex ${isSidebarOpen ? 'w-80' : 'w-20'} transition-width duration-300 bg-darkBlue text-white h-screen`}>
       {/* Sidebar Content */}
       <div className={`flex flex-col w-full ${isSidebarOpen ? 'p-6' : 'p-3'}`}>
         {/* App Name & Arrow Toggle */}
         <div className="flex items-center justify-between">
-          {isSidebarOpen && <h1 className="text-2xl font-bold">Lead Extractor</h1>}
+
+          {isSidebarOpen && <div className='flex items-center gap-4'>
+                              <img src="/Risorsa_7c.svg" alt="Logo" className="w-8 h-8" />
+                              <h1 className="text-2xl font-bold">Lead Extractor</h1>
+                            </div>}
           <button
             onClick={toggleSidebar}
             className="text-white focus:outline-none hover:cursor-pointer"
@@ -41,8 +45,8 @@ export default function Sidebar({ setActivePage }: { setActivePage: (page: strin
             <button
               key={item.title}
               onClick={() => handleNavigation(item.title)}
-              className={`flex items-center space-x-4 p-3 rounded-lg hover:bg-gray-700 hover:cursor-pointer ${
-                activePage === item.title ? 'bg-gray-700' : ''
+              className={`flex items-center space-x-4 p-3 rounded-lg hover:bg-whiteIce hover:text-black hover:cursor-pointer ${
+                activePage === item.title ? 'bg-whiteIce text-black' : ''
               }`}
             >
               {item.icon}

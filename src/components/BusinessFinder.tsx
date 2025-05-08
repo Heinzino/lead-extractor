@@ -126,7 +126,7 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
         <div className="flex items-center mb-2">
           <h1 className="text-2xl font-bold">Business Finder</h1>
         </div>
-        <p className="text-gray-400">
+        <p className="text-gray-500">
           Upload a CSV with companies and websites. We&apos;ll enrich it with decision maker info and emails.
         </p>
       </div>
@@ -135,7 +135,7 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
         <div className="space-y-3">
           <label 
             htmlFor="file-upload" 
-            className="block text-sm font-medium text-gray-400"
+            className="block text-sm font-medium text-gray-500"
           >
             Upload CSV File
           </label>
@@ -144,7 +144,7 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
             className={`
               relative border-2 border-dashed rounded-xl p-18
               flex flex-col items-center justify-center text-center
-              cursor-pointer bg-gray-700 hover:bg-gray-600 transition-all duration-200
+              cursor-pointer bg-gray-200 hover:bg-gray-100 transition-all duration-200
               ${isDragging ? 'border-blue-400 bg-blue-50' : ''}
               ${file ? 'border-green-400 bg-green-50' : 'border-gray-300'}
             `}
@@ -161,16 +161,16 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
               </div>
             ) : (
               <>
-                <div className="bg-blue-100 rounded-full p-3 mb-4">
+                <div className="bg-white rounded-full p-3 mb-4">
                   <Upload 
-                    className="w-10 h-10 text-blue-500" 
+                    className="w-10 h-10 text-accentBlue" 
                     strokeWidth={1.5}
                   />
                 </div>
-                <p className="text-sm font-medium text-gray-300 mb-1">
+                <p className="text-sm font-medium text-gray-600 mb-1">
                   {isDragging ? 'Drop your CSV file here' : 'Drag and drop your CSV file here'}
                 </p>
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-gray-500">
                   or click to browse files
                 </p>
               </>
@@ -224,7 +224,7 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
           <button
             type="button"
             onClick={downloadSampleFile}
-            className="text-blue-600 hover:text-blue-800 font-medium flex items-center hover:underline hover:cursor-pointer"
+            className="text-darkBlue font-medium flex items-center hover:underline hover:cursor-pointer"
           >
             <Download className="w-4 h-4 mr-1" />
             Download Sample File
@@ -235,7 +235,7 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
           <div>
             <label 
               htmlFor="job-titles" 
-              className="block text-sm font-medium text-gray-400 mb-2"
+              className="block text-sm font-medium text-gray-500 mb-2"
             >
               What job titles would you like to search for?
             </label>
@@ -247,7 +247,7 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
               onChange={(e) => setJobTitles(e.target.value)}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
             />
-            <p className="mt-2 text-xs text-gray-500">
+            <p className="mt-2 text-xs text-gray-400">
               Enter comma separated job titles
             </p>
           </div>
@@ -255,7 +255,7 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
           <div>
             <label 
               htmlFor="file-name" 
-              className="block text-sm font-medium text-gray-400 mb-2"
+              className="block text-sm font-medium text-gray-500 mb-2"
             >
               What do you want to name your file?
             </label>
@@ -278,7 +278,7 @@ const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) =>
             className={`
               w-full md:w-auto px-6 py-3 rounded-lg font-medium text-white
               ${isEnriching || !file 
-                ? 'bg-gray-400 cursor-not-allowed' 
+                ? 'bg-gray-300 cursor-not-allowed' 
                 : 'bg-blue-600 hover:bg-blue-700 shadow-md hover:shadow-lg'}
               transition-all duration-200 flex items-center justify-center
             `}
