@@ -3,16 +3,17 @@ import { useCallback, useState } from 'react';
 import { Upload } from 'lucide-react';
 
 
-export default function FileUploaderBox({handleFileUpload, isUploading, file}: {handleFileUpload: (file: File) => void, isUploading: boolean, file: File | null}) {
+export default function FileUploaderBox({handleFileUpload, isUploading, file, type}: {handleFileUpload: (file: File, type: 'cities' | 'queries' | 'businesses' | 'combined') => void, isUploading: boolean, file: File | null, type: 'cities' | 'queries' | 'businesses' | 'combined'}) {
     const [isDragging, setIsDragging] = useState(false);
 
     const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();
         setIsDragging(false);
         if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-          handleFileUpload(e.dataTransfer.files[0]);
+          console.log('type', type);
+          handleFileUpload(e.dataTransfer.files[0], type);
         }
-      }, [handleFileUpload]);
+      }, [handleFileUpload, type]);
     
     const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();
@@ -31,9 +32,10 @@ export default function FileUploaderBox({handleFileUpload, isUploading, file}: {
     
     const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
-          handleFileUpload(e.target.files[0]);
+          console.log('type', type);
+          handleFileUpload(e.target.files[0], type);
         }
-      }, [handleFileUpload]);
+      }, [handleFileUpload, type]);
 
     return (
         <div
@@ -48,7 +50,7 @@ export default function FileUploaderBox({handleFileUpload, isUploading, file}: {
         onDragOver={handleDragOver}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
-        onClick={() => document?.getElementById('file-upload')?.click()}
+        onClick={() => document?.getElementById(`file-upload-${type}`)?.click()}
       >
         {isUploading ? (
           <div className="py-4">
@@ -72,7 +74,7 @@ export default function FileUploaderBox({handleFileUpload, isUploading, file}: {
           </>
         )}
         <input
-          id="file-upload"
+          id={`file-upload-${type}`}
           type="file"
           accept=".csv"
           onChange={handleFileChange}

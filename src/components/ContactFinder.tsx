@@ -15,14 +15,14 @@ export default function ContactFinder() {
   const [toastType, setToastType] = useState<"success" | "error" | "warning">('success');
 
 
-  const handleFileUpload = useCallback((uploadedFile: File) => {
+  const handleFileUpload = useCallback((uploadedFile: File, type: string) => {
     if (!uploadedFile.name.endsWith('.csv')) {
       setToastMessage('Please upload a CSV file');
       setToastType('error');
       setShowToast(true);
       return;
     }
-    
+    console.log('type', type);
     setIsUploading(true);
     // Simulate upload delay
     setTimeout(() => {
@@ -84,7 +84,7 @@ export default function ContactFinder() {
   }, []);
 
   return (
-    <div className="w-full mx-auto p-4 md:px-6 md:pt-4 md:pb-6">
+    <div className="w-full mx-auto p-4 md:px-6 md:pt-4 md:pb-24">
       {showToast && (
         <Toast 
           message={toastMessage} 
@@ -114,6 +114,7 @@ export default function ContactFinder() {
           handleFileUpload={handleFileUpload}
           isUploading={isUploading}
           file={file}
+          type={'businesses'}
           />
         </div>
 
