@@ -4,6 +4,7 @@ import { useRouter } from 'next/router';
 import { AuthProvider } from '@/context/AuthContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import '@/styles/globals.css';
+import { manrope } from '@/lib/fonts';
 
 const noAuthRequired = ['/login'];
 
@@ -13,13 +14,15 @@ export default function App({ Component, pageProps }: AppProps) {
 
   return (
     <AuthProvider>
-      {isPublic ? (
-        <Component {...pageProps} />
-      ) : (
-        <ProtectedRoute>
+      <main className={`${manrope.variable}`}>
+        {isPublic ? (
           <Component {...pageProps} />
-        </ProtectedRoute>
-      )}
+        ) : (
+          <ProtectedRoute>
+            <Component {...pageProps} />
+          </ProtectedRoute>
+        )}
+      </main>
     </AuthProvider>
   );
 }

@@ -1,5 +1,16 @@
 @import "tailwindcss";
 
+/* Add this at the top of your globals.css file */
+html, 
+body {
+  font-family: 'Manrope', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif !important;
+}
+
+/* If needed, you could also try more broadly */
+* {
+  font-family: 'Manrope', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif !important;
+}
+
 @keyframes fade-in-up {
     from {
       opacity: 0;

@@ -1,10 +1,9 @@
 module.exports = {
-    theme: {
-      extend: {
-        fontFamily: {
-          sans: ['Geist', 'ui-sans-serif', 'system-ui'],
-        },
+  theme: {
+    extend: {
+      fontFamily: {
+        sans: ['var(--font-manrope)', 'ui-sans-serif', 'system-ui'],
       },
     },
-  };
-  
+  },
+};
