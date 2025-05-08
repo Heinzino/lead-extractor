@@ -34,7 +34,7 @@ export default function BusinessFinder() {
         setShowToast(true);
       }, 1000);
     }
-      if (type === 'combined') {
+     else if (type === 'combined') {
         setIsUploadingCombined(true);
         setTimeout(() => {
           setCombinedFile(file);
@@ -43,7 +43,7 @@ export default function BusinessFinder() {
           setToastType('success');
           setShowToast(true);
         }, 1000);
-    } else {
+    } else if (type === 'queries') {
       setIsUploadingQueries(true);
       setTimeout(() => {
         setQueriesFile(file);
