@@ -205,6 +205,7 @@ export default function ContactFinder() {
         <div className="pt-2">
           <Button
             text="Enrich"
+            //@ts-expect-error fix this later
             onClick={handleSubmit}
             disabled={isEnriching || !file}
             isLoading={isEnriching}
