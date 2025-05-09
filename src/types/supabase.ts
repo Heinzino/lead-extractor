@@ -27,9 +27,49 @@ export type Database = {
         }
         Relationships: []
       }
+      zip_codes: {
+        Row: {
+          zip: string
+          lat: string
+          lng: string
+          city: string
+          state_id: string
+          state_name: string
+          county_name: string
+        }
+        Insert: {
+          zip: string
+          lat: string
+          lng: string
+          city: string
+          state_id: string
+          state_name: string
+          county_name: string
+        }
+        Update: {
+          zip?: string
+          lat?: string
+          lng?: string
+          city?: string
+          state_id?: string
+          state_name?: string
+          county_name?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
-      [_ in never]: never
+      zip_codes_view: {
+        Row: {
+          zip: string
+          lat: number
+          lng: number
+          city: string
+          state_id: string
+          state_name: string
+          county_name: string
+        }
+      }
     }
     Functions: {
       [_ in never]: never
