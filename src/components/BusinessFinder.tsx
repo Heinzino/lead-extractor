@@ -4,7 +4,6 @@ import FileUploaderBox from './FileUploaderBox';
 import Button from './Button';
 import Toast from './Toast';
 import { supabase } from '@/lib/supabase/supabaseClient';
-import { runSerper } from '@/lib/services/serper/index';
 
 export default function BusinessFinder() {
   const [citiesFile, setCitiesFile] = useState<File | null>(null);
@@ -14,7 +13,6 @@ export default function BusinessFinder() {
   const [isUploadingQueries, setIsUploadingQueries] = useState(false);
   const [isUploadingCombined, setIsUploadingCombined] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isLoadingSerperRequest, setIsLoadingSerperRequest] = useState(false)
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<"success" | "error" | "warning">('success');
@@ -149,6 +147,18 @@ export default function BusinessFinder() {
     }
   }, [citiesFile, queriesFile]);
 
+  const generateFileName = (rows: { query: string }[]) => {
+    const queries = [...new Set(rows.slice(0, 10).map(row => row.query))];
+    const cleanQueries = queries.map(q => 
+      q.toLowerCase()
+        .replace(/\s+in\s+/g, '')
+        .replace(/[^a-z0-9]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+    );
+    return cleanQueries.join('-');
+  };
+
   const handleSerperQueries = useCallback(async () => {
     if (!combinedFile) {
       setToastMessage('Please upload the combined CSV file');
@@ -157,7 +167,9 @@ export default function BusinessFinder() {
       return;
     }
 
-    setIsLoadingSerperRequest(true);
+    setIsGenerating(true);
+    let resultId: string | null = null;
+    
     try {      
       const combinedText = await combinedFile.text();      
       const rows = combinedText
@@ -169,57 +181,66 @@ export default function BusinessFinder() {
           return { query, city, state, zip };
         });
      
-      const results = await runSerper(rows);
-     
-      const allKeys = new Set([
-        'query', 'city', 'zip', 'search_term', 'page', 'is_valid', 'maps_url'
-      ]);
 
-     
-      results.forEach(result => {
-        Object.keys(result).forEach(key => allKeys.add(key));
+      const { data: user } = await supabase.auth.getUser();
+      if (!user.user) {
+        throw new Error('User not authenticated');
+      }
+
+      const fileName = generateFileName(rows);
+      const { data: result, error: createError } = await supabase
+        .from('serper_results')
+        .insert({
+          user_id: user.user.id,
+          file_name: fileName,
+          status: 'RUNNING'
+        })
+        .select('id')
+        .single();
+
+      if (createError) {
+        throw new Error(`Error creating result record: ${createError.message}`);
+      }
+
+      resultId = result.id;
+
+      const response = await fetch('/api/serper/process', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          resultId,
+          rows
+        })
       });
 
-      const headers = [
-        'query', 'city', 'zip', 'search_term', 'page', 'is_valid', 'maps_url'
-      ].concat(Array.from(allKeys)
-        .filter(k => !['query', 'city', 'zip', 'search_term', 'page', 'is_valid', 'maps_url'].includes(k))
-        .sort()
-      );
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Error starting background processing');
+      }
 
-      const resultsHeader = headers.join(',') + '\n';
-      const resultsRows = results.map(result => 
-        headers.map(header => {
-          const value = result[header] ?? '';
-          return `"${String(value).replace(/"/g, '""')}"`;
-        }).join(',')
-      ).join('\n');
-      
-      const resultsContent = resultsHeader + resultsRows;
-
-      console.log(`Done! Found ${results.length} unique businesses`);
-
-     
-      const blob = new Blob([resultsContent], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'serper_results.csv';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-
-      setToastMessage(`Serper queries completed successfully. Found ${results.length} unique businesses.`);
-      setToastType('success');
-      setShowToast(true);
+      window.location.href = '/?page=Results&status=processing';
     } catch (error) {
-      console.error('Error running Serper queries:', error);
-      setToastMessage(error instanceof Error ? error.message : 'Error running Serper queries');
+      console.error('Error starting Serper queries:', error);
+      
+
+      if (resultId) {
+        await supabase
+          .from('serper_results')
+          .update({
+            status: 'ERROR',
+            error_message: error instanceof Error ? error.message : 'Unknown error',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', resultId);
+      }
+
+      setToastMessage(error instanceof Error ? error.message : 'Error starting Serper queries');
       setToastType('error');
       setShowToast(true);
     } finally {
-      setIsLoadingSerperRequest(false);
+      setIsGenerating(false);
     }
   }, [combinedFile]);
 
@@ -427,14 +448,11 @@ export default function BusinessFinder() {
           )}
         </div>
         <div className="w-full flex flex-col items-center mt-16">
-          <p className="text-sm text-amber-600/50 mb-4">
-            This might take a few minutes depending on your file size.
-          </p>
           <Button
             text="Run Serper Queries"
             onClick={handleSerperQueries}
-            disabled={isLoadingSerperRequest || !combinedFile}
-            isLoading={isLoadingSerperRequest}
+            disabled={isGenerating || !combinedFile}
+            isLoading={isGenerating}
             width={48}
             height={16}
           />
