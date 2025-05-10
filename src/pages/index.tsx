@@ -1,17 +1,12 @@
 "use client";
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase/supabaseClient';
-import type { Database } from '@/types/supabase'; 
+import { useState } from 'react';; 
 import Results from '@/components/Results';
 import BusinessFinder from '@/components/BusinessFinder';
 import ContactFinder from '@/components/ContactFinder';
 import Settings from '@/components/Settings';
 import Sidebar from '@/components/Sidebar';
 
-type TestRow = Database['public']['Tables']['test']['Row'];
-
 export default function Home() {
-  const [data, setData] = useState<TestRow[]>([]);
   const [activePage, setActivePage] = useState<string>('Results');
 
   const renderActivePage = () => {
@@ -28,18 +23,6 @@ export default function Home() {
         return <Results />;
     }
   };
-
-  useEffect(() => {
-    const fetchTestData = async () => {
-      const { data, error } = await supabase
-        .from('test')
-        .select('*');
-      if (error) console.error('Error fetching data:', error);
-      else setData(data);
-    };
-
-    fetchTestData();
-  }, []);
 
   return (
     <div className="flex h-screen">

@@ -16,7 +16,7 @@ export default function ContactFinder() {
   const [toastType, setToastType] = useState<"success" | "error" | "warning">('success');
 
 
-  const handleFileUpload = useCallback((uploadedFile: File, type: string) => {
+  const handleFileUpload = useCallback((uploadedFile: File) => {
     if (!uploadedFile.name.endsWith('.csv')) {
       setToastMessage('Please upload a CSV file');
       setToastType('error');

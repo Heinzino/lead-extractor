@@ -105,6 +105,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const jobTitles = String(fields.jobTitles).split(',').map(t => t.trim());
+    //@ts-expect-error fix this later
     const filePath = Array.isArray(files.file) ? files.file[0].filepath : files.file.filepath;
 
     const csv = fs.readFileSync(filePath, 'utf8');
