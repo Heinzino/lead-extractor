@@ -148,6 +148,22 @@ export default function BusinessFinder() {
     }
   }, [citiesFile, queriesFile]);
 
+  const generateFileName = (rows: { query: string }[]) => {
+    // Get unique queries from the first few rows
+    const queries = [...new Set(rows.slice(0, 10).map(row => row.query))];
+    // Clean up query names (remove "in" and special characters)
+    const cleanQueries = queries.map(q => 
+      q.toLowerCase()
+        .replace(/\s+in\s+/g, '')
+        .replace(/[^a-z0-9]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+    );
+    // Join queries and add timestamp
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    return `${cleanQueries.join('-')}-${timestamp}`;
+  };
+
   const handleSerperQueries = useCallback(async () => {
     if (!combinedFile) {
       setToastMessage('Please upload the combined CSV file');
@@ -157,6 +173,8 @@ export default function BusinessFinder() {
     }
 
     setIsGenerating(true);
+    let resultId: string | null = null;
+
     try {      
       const combinedText = await combinedFile.text();      
       const rows = combinedText
@@ -168,13 +186,36 @@ export default function BusinessFinder() {
           return { query, city, state, zip };
         });
      
+      // Create initial record with RUNNING status
+      const { data: user } = await supabase.auth.getUser();
+      if (!user.user) {
+        throw new Error('User not authenticated');
+      }
+
+      const fileName = generateFileName(rows);
+      const { data: result, error: createError } = await supabase
+        .from('serper_results')
+        .insert({
+          user_id: user.user.id,
+          file_name: fileName,
+          status: 'RUNNING'
+        })
+        .select('id')
+        .single();
+
+      if (createError) {
+        throw new Error(`Error creating result record: ${createError.message}`);
+      }
+
+      resultId = result.id;
+
+      // Run the queries
       const results = await runSerper(rows);
      
       const allKeys = new Set([
         'query', 'city', 'zip', 'search_term', 'page', 'is_valid', 'maps_url'
       ]);
 
-     
       results.forEach(result => {
         Object.keys(result).forEach(key => allKeys.add(key));
       });
@@ -195,15 +236,47 @@ export default function BusinessFinder() {
       ).join('\n');
       
       const resultsContent = resultsHeader + resultsRows;
-
-      console.log(`Done! Found ${results.length} unique businesses`);
-
-     
       const blob = new Blob([resultsContent], { type: 'text/csv' });
+
+      // Upload file to Supabase Storage
+      const filePath = `${user.user.id}/${fileName}.csv`;
+      const { error: uploadError } = await supabase.storage
+        .from('serper-results')
+        .upload(filePath, blob, {
+          contentType: 'text/csv',
+          upsert: true
+        });
+
+      if (uploadError) {
+        throw new Error(`Error uploading file: ${uploadError.message}`);
+      }
+
+      // Get public URL for the file
+      const { data: { publicUrl } } = supabase.storage
+        .from('serper-results')
+        .getPublicUrl(filePath);
+
+      // Update record with DONE status, result count, and file path
+      const { error: updateError } = await supabase
+        .from('serper_results')
+        .update({
+          status: 'DONE',
+          result_count: results.length,
+          file_path: filePath,
+          file_url: publicUrl,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', resultId);
+
+      if (updateError) {
+        throw new Error(`Error updating result record: ${updateError.message}`);
+      }
+
+      // Download file
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = 'serper_results.csv';
+      link.download = `${fileName}.csv`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -214,6 +287,19 @@ export default function BusinessFinder() {
       setShowToast(true);
     } catch (error) {
       console.error('Error running Serper queries:', error);
+      
+      // Update record with ERROR status if we have a resultId
+      if (resultId) {
+        await supabase
+          .from('serper_results')
+          .update({
+            status: 'ERROR',
+            error_message: error instanceof Error ? error.message : 'Unknown error',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', resultId);
+      }
+
       setToastMessage(error instanceof Error ? error.message : 'Error running Serper queries');
       setToastType('error');
       setShowToast(true);
