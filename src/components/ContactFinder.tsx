@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useCallback } from 'react';
 import { X, Download, FileText } from 'lucide-react';
 import Button from './Button';
@@ -22,7 +23,6 @@ export default function ContactFinder() {
       setShowToast(true);
       return;
     }
-    console.log('type', type);
     setIsUploading(true);
     // Simulate upload delay
     setTimeout(() => {
@@ -45,39 +45,69 @@ export default function ContactFinder() {
     link.click();
   }, []);
 
-  const handleSubmit = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
-    if (e) e.preventDefault();
-    
-    if (!file) {
-      setToastMessage('Please upload a CSV file first');
-      setToastType('error');
-      setShowToast(true);
-      return;
+const handleSubmit = useCallback(async (e: React.MouseEvent<HTMLButtonElement>) => {
+  if (e) e.preventDefault();
+
+  if (!file) {
+    setToastMessage('Please upload a CSV file first');
+    setToastType('error');
+    setShowToast(true);
+    return;
+  }
+
+  if (!jobTitles.trim()) {
+    setToastMessage('Please enter job titles');
+    setToastType('error');
+    setShowToast(true);
+    return;
+  }
+
+  if (!fileName.trim()) {
+    setToastMessage('Please enter a file name');
+    setToastType('error');
+    setShowToast(true);
+    return;
+  }
+
+  setIsEnriching(true);
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('jobTitles', jobTitles);
+    formData.append('fileName', fileName);
+
+    const response = await fetch('/api/enrich', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.statusText}`);
     }
 
-    if (!jobTitles.trim()) {
-      setToastMessage('Please enter job titles');
-      setToastType('error');
-      setShowToast(true);
-      return;
-    }
+    const blob = await response.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
 
-    if (!fileName.trim()) {
-      setToastMessage('Please enter a file name');
-      setToastType('error');
-      setShowToast(true);
-      return;
-    }
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = `${fileName}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(downloadUrl);
 
-    setIsEnriching(true);
-    // Simulate enrichment process
-    setTimeout(() => {
-      setIsEnriching(false);
-      setToastMessage('Enrichment completed successfully');
-      setToastType('success');
-      setShowToast(true);
-    }, 2000);
-  }, [file, jobTitles, fileName]);
+    setToastMessage('Enrichment completed successfully');
+    setToastType('success');
+  } catch (err: any) {
+    console.error('Enrichment error:', err);
+    setToastMessage(`Enrichment failed: ${err.message}`);
+    setToastType('error');
+  } finally {
+    setShowToast(true);
+    setIsEnriching(false);
+  }
+}, [file, jobTitles, fileName]);
 
   const closeToast = useCallback(() => {
     setShowToast(false);

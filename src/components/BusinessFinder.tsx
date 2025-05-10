@@ -14,6 +14,7 @@ export default function BusinessFinder() {
   const [isUploadingQueries, setIsUploadingQueries] = useState(false);
   const [isUploadingCombined, setIsUploadingCombined] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isLoadingSerperRequest, setIsLoadingSerperRequest] = useState(false)
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<"success" | "error" | "warning">('success');
@@ -156,7 +157,7 @@ export default function BusinessFinder() {
       return;
     }
 
-    setIsGenerating(true);
+    setIsLoadingSerperRequest(true);
     try {      
       const combinedText = await combinedFile.text();      
       const rows = combinedText
@@ -218,7 +219,7 @@ export default function BusinessFinder() {
       setToastType('error');
       setShowToast(true);
     } finally {
-      setIsGenerating(false);
+      setIsLoadingSerperRequest(false);
     }
   }, [combinedFile]);
 
@@ -432,8 +433,8 @@ export default function BusinessFinder() {
           <Button
             text="Run Serper Queries"
             onClick={handleSerperQueries}
-            disabled={isGenerating || !combinedFile}
-            isLoading={isGenerating}
+            disabled={isLoadingSerperRequest || !combinedFile}
+            isLoading={isLoadingSerperRequest}
             width={48}
             height={16}
           />
