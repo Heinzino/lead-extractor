@@ -17,6 +17,7 @@ const FINDYMAIL_API_KEY = process.env.FINDYMAIL_API_KEY;
 const PPLX_API_URL = 'https://api.perplexity.ai/chat/completions';
 const FINDYMAIL_API_URL = 'https://app.findymail.com/api/search/name';
 const PPLX_MODEL = 'sonar-pro';
+const PPLX_COST_PER_1K_TOKENS = 0.002;
 
 function normalizeDomain(url: string): string {
   try {
@@ -36,22 +37,26 @@ function cleanEmail(email: string): string {
 }
 
 function generatePrompt(company: string, domain: string, jobTitle: string) {
-  const user = `Hello, can you help me find the person who holds the jobtitle: ${jobTitle} at company: ${company} which has website: ${domain}?\n\nIMPORTANT:\nOnly return a person's full name if you are at least 95% confident that the individual actually holds the job title requested.\nIf you cannot confidently verify this match, return \"na\" instead.`;
-  const system = `Please return ONLY the full name of the person matching the requested job title if you are at least 95% confident they hold it.\nIf you are not 95% confident, return 'na'.\nReturn nothing else.`;
+  const user = `Hello, can you help me find the person who holds the jobtitle: ${jobTitle} at company: ${company} which has website: ${domain}?
+
+IMPORTANT:
+Only return a person's full name if you are at least 95% confident that the individual actually holds the job title requested.
+If you cannot confidently verify this match, return \"na\" instead.`;
+  const system = `Please return ONLY the full name of the person matching the requested job title if you are at least 95% confident they hold it.
+If you are not 95% confident, return 'na'.
+Return nothing else.`;
   return { user, system };
 }
 
 function generateFallbackPrompt(domain: string) {
-  const user = `For the company website ${domain}, please try to identify a contact email address found on the website. Please return a cleaned email address and nothing else.\n\nIf email is not found return na.`;
+  const user = `For the company website ${domain}, please try to identify a contact email address found on the website. Please return a cleaned email address and nothing else.
+
+If email is not found return na.`;
   const system = `The only thing that should ever be outputted is an email if it was found or \"na\".`;
   return { user, system };
 }
 
 async function callPerplexity(user: string, system: string) {
-  console.log('\n🔹 Calling Perplexity...');
-  console.log('System prompt:', system);
-  console.log('User prompt:', user);
-
   const body = {
     model: PPLX_MODEL,
     messages: [
@@ -70,15 +75,13 @@ async function callPerplexity(user: string, system: string) {
   });
 
   const json = await res.json();
-  console.log('Perplexity response:', JSON.stringify(json, null, 2));
-
-  return json.choices?.[0]?.message?.content?.trim() || 'na';
+  const content = json.choices?.[0]?.message?.content?.trim() || 'na';
+  const tokens = json.usage?.total_tokens || 1000;
+  const cost = (tokens / 1000) * PPLX_COST_PER_1K_TOKENS;
+  return { content, cost, status: 'success' };
 }
 
 async function callFindymail(name: string, domain: string) {
-  console.log('\n🔹 Calling Findymail...');
-  console.log('Searching for:', name, 'at domain:', domain);
-
   const res = await fetch(FINDYMAIL_API_URL, {
     method: 'POST',
     headers: {
@@ -88,10 +91,8 @@ async function callFindymail(name: string, domain: string) {
     body: JSON.stringify({ name, domain }),
   });
 
-  const json = await res.json();
-  console.log('Findymail response:', JSON.stringify(json, null, 2));
-
   if (!res.ok) return 'na';
+  const json = await res.json();
   return json?.contact?.email || 'na';
 }
 
@@ -100,70 +101,73 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   form.parse(req, async (err, fields, files) => {
     if (err || !files.file || !fields.jobTitles) {
-      console.error('❌ Missing required input:', { err, fields, files });
       return res.status(400).json({ error: 'Missing required input.' });
     }
 
-    console.log('✅ Form fields received:', fields);
     const jobTitles = String(fields.jobTitles).split(',').map(t => t.trim());
-
     const filePath = Array.isArray(files.file) ? files.file[0].filepath : files.file.filepath;
-    console.log('📄 Uploaded file path:', filePath);
 
     const csv = fs.readFileSync(filePath, 'utf8');
     const records = parse(csv, { columns: true });
-    console.log(`📊 Parsed ${records.length} rows from CSV`);
-
     let enrichedRows: any[] = [];
 
     for (const row of records) {
-      console.log('\n🔍 Processing row:', row);
-
       const domain = normalizeDomain(row['Company website']);
-      console.log('🌐 Normalized domain:', domain);
 
       for (const jobTitle of jobTitles) {
-        console.log(`\n🎯 Looking for job title "${jobTitle}" at "${row['Company name']}"`);
-
         const { user, system } = generatePrompt(row['Company name'], domain, jobTitle);
-        const personName = cleanName(await callPerplexity(user, system));
 
-        console.log('👤 Found person name:', personName);
+        let content = 'na';
+        let cost = 0;
+        let status = 'error';
+        let attempts = 0;
+
+        for (let i = 0; i < 5; i++) {
+          try {
+            const result = await callPerplexity(user, system);
+            content = cleanName(result.content);
+            cost = result.cost;
+            status = result.status;
+            break;
+          } catch {
+            await new Promise(r => setTimeout(r, 2 ** i * 1000));
+          }
+          attempts++;
+        }
 
         let personEmail = 'na';
         let websiteEmail = 'na';
 
-        if (personName && personName.toLowerCase() !== 'na') {
-          personEmail = cleanEmail(await callFindymail(personName, domain));
-          console.log('📧 Person email from Findymail:', personEmail);
+        if (content && content.toLowerCase() !== 'na') {
+          personEmail = cleanEmail(await callFindymail(content, domain));
         }
 
         if (!personEmail || personEmail.toLowerCase() === 'na') {
-          console.log('🔄 Falling back to website email...');
           const fallback = generateFallbackPrompt(domain);
-          websiteEmail = cleanEmail(await callPerplexity(fallback.user, fallback.system));
-          console.log('🌐 Website email from Perplexity:', websiteEmail);
+          const fallbackResult = await callPerplexity(fallback.user, fallback.system);
+          websiteEmail = cleanEmail(fallbackResult.content);
         }
 
         const finalRow = {
           ...row,
+          'Normalized Domain': domain,
           'Desired Job Title': jobTitle,
-          'Found Person Name': personName,
+          'Found Person Name': content,
+          'Total Cost': cost.toFixed(6),
+          'Annotation': status,
+          'Attempts': attempts + 1,
           'Person Email': personEmail,
           'Website Email': websiteEmail,
           'Final Email': personEmail !== 'na' ? personEmail : websiteEmail,
         };
 
-        console.log('✅ Enriched row:', finalRow);
         enrichedRows.push(finalRow);
       }
     }
 
     const output = stringify(enrichedRows, { header: true });
-    console.log('\n✅ Final CSV ready. Returning response...');
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="enriched-data.csv"');
     res.status(200).send(output);
   });
 }
- 
