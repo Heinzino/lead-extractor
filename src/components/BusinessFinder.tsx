@@ -13,7 +13,6 @@ export default function BusinessFinder() {
   const [isUploadingQueries, setIsUploadingQueries] = useState(false);
   const [isUploadingCombined, setIsUploadingCombined] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isLoadingSerperRequest, setIsLoadingSerperRequest] = useState(false)
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<"success" | "error" | "warning">('success');
@@ -170,7 +169,7 @@ export default function BusinessFinder() {
 
     setIsGenerating(true);
     let resultId: string | null = null;
-
+    
     try {      
       const combinedText = await combinedFile.text();      
       const rows = combinedText
@@ -205,7 +204,7 @@ export default function BusinessFinder() {
 
       resultId = result.id;
 
-      fetch('/api/serper/process', {
+      const response = await fetch('/api/serper/process', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -214,9 +213,12 @@ export default function BusinessFinder() {
           resultId,
           rows
         })
-      }).catch(error => {
-        console.error('Error starting background processing:', error);
       });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Error starting background processing');
+      }
 
       window.location.href = '/?page=Results&status=processing';
     } catch (error) {
@@ -238,7 +240,7 @@ export default function BusinessFinder() {
       setToastType('error');
       setShowToast(true);
     } finally {
-      setIsLoadingSerperRequest(false);
+      setIsGenerating(false);
     }
   }, [combinedFile]);
 
@@ -449,8 +451,8 @@ export default function BusinessFinder() {
           <Button
             text="Run Serper Queries"
             onClick={handleSerperQueries}
-            disabled={isLoadingSerperRequest || !combinedFile}
-            isLoading={isLoadingSerperRequest}
+            disabled={isGenerating || !combinedFile}
+            isLoading={isGenerating}
             width={48}
             height={16}
           />
