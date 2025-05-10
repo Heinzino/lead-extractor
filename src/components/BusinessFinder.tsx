@@ -425,7 +425,10 @@ export default function BusinessFinder() {
             </div>
           )}
         </div>
-        <div className="w-full flex justify-center mt-16">
+        <div className="w-full flex flex-col items-center mt-16">
+          <p className="text-sm text-amber-600/50 mb-4">
+            This might take a few minutes depending on your file size.
+          </p>
           <Button
             text="Run Serper Queries"
             onClick={handleSerperQueries}
