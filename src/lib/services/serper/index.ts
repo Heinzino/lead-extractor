@@ -43,7 +43,9 @@ async function fetchPlaces(row: SerperQueryRow): Promise<SerperPlace[]> {
                     city: normalizeText(row.city),
                     zip: row.zip,
                     search_term: searchTerm,
-                    page: page
+                    page: page,
+                    is_valid: place.cid ? 'true' : 'false',
+                    maps_url: place.cid ? `https://www.google.com/maps?cid=${place.cid}` : ''
                 };
                 Object.keys(entry).forEach(key => {
                     const value = entry[key];
