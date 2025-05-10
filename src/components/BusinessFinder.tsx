@@ -4,6 +4,7 @@ import FileUploaderBox from './FileUploaderBox';
 import Button from './Button';
 import Toast from './Toast';
 import { supabase } from '@/lib/supabase/supabaseClient';
+import { runSerper } from '@/lib/services/serper';
 
 export default function BusinessFinder() {
   const [citiesFile, setCitiesFile] = useState<File | null>(null);
@@ -72,14 +73,13 @@ export default function BusinessFinder() {
 
     setIsGenerating(true);
     try {
-      // Read and parse the CSV files
       const citiesText = await citiesFile.text();
       const queriesText = await queriesFile.text();
 
       const cities = citiesText
         .split('\n')
-        .slice(1) // Skip header
-        .filter(line => line.trim()) // Remove empty lines
+        .slice(1)
+        .filter(line => line.trim())
         .map(line => {
           const [city, state] = line.split(',').map(s => s.trim());
           return { city, state };
@@ -87,11 +87,11 @@ export default function BusinessFinder() {
 
       const queries = queriesText
         .split('\n')
-        .slice(1) // Skip header
-        .filter(line => line.trim()) // Remove empty lines
+        .slice(1)
+        .filter(line => line.trim())
         .map(line => line.trim());
 
-      // Get zip codes for each city from Supabase
+     
       const combinedRows = [];
       for (const { city, state } of cities) {
         const { data: zipCodes, error } = await supabase
@@ -104,7 +104,7 @@ export default function BusinessFinder() {
           throw new Error(`Error fetching zip codes: ${error.message}`);
         }
 
-        // Create a row for each query and zip code combination
+       
         for (const query of queries) {
           for (const { zip } of zipCodes) {
             combinedRows.push({
@@ -117,14 +117,14 @@ export default function BusinessFinder() {
         }
       }
 
-      // Generate CSV content
+     
       const csvHeader = 'query,city,state,zip\n';
       const csvRows = combinedRows.map(row => 
         `${row.query},${row.city},${row.state},${row.zip}`
       ).join('\n');
       const csvContent = csvHeader + csvRows;
 
-      // Create and download the file
+     
       const blob = new Blob([csvContent], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -156,8 +156,81 @@ export default function BusinessFinder() {
       return;
     }
 
-    setToastType('warning');
-    setShowToast(true);
+    setIsGenerating(true);
+    try {
+      console.log('Starting Serper queries process');
+      
+     
+      const combinedText = await combinedFile.text();
+      console.log('Read combined file:', combinedText.substring(0, 100) + '...');
+      
+      const rows = combinedText
+        .split('\n')
+        .slice(1)
+        .filter(line => line.trim())
+        .map(line => {
+          const [query, city, state, zip] = line.split(',').map(s => s.trim());
+          return { query, city, state, zip };
+        });
+
+      console.log('Parsed rows:', rows.length);
+
+     
+      const results = await runSerper(rows);
+
+      console.log('All queries completed, generating CSV');
+
+     
+      const allKeys = new Set([
+        'query', 'city', 'zip', 'search_term', 'page', 'is_valid', 'maps_url'
+      ]);
+
+     
+      results.forEach(result => {
+        Object.keys(result).forEach(key => allKeys.add(key));
+      });
+
+      const headers = [
+        'query', 'city', 'zip', 'search_term', 'page', 'is_valid', 'maps_url'
+      ].concat(Array.from(allKeys)
+        .filter(k => !['query', 'city', 'zip', 'search_term', 'page', 'is_valid', 'maps_url'].includes(k))
+        .sort()
+      );
+
+      const resultsHeader = headers.join(',') + '\n';
+      const resultsRows = results.map(result => 
+        headers.map(header => {
+          const value = result[header] ?? '';
+          return `"${String(value).replace(/"/g, '""')}"`;
+        }).join(',')
+      ).join('\n');
+      
+      const resultsContent = resultsHeader + resultsRows;
+
+      console.log(`Done! Found ${results.length} unique businesses`);
+
+     
+      const blob = new Blob([resultsContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'serper_results.csv';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      setToastMessage(`Serper queries completed successfully. Found ${results.length} unique businesses.`);
+      setToastType('success');
+      setShowToast(true);
+    } catch (error) {
+      console.error('Error running Serper queries:', error);
+      setToastMessage(error instanceof Error ? error.message : 'Error running Serper queries');
+      setToastType('error');
+      setShowToast(true);
+    } finally {
+      setIsGenerating(false);
+    }
   }, [combinedFile]);
 
   const closeToast = useCallback(() => {
