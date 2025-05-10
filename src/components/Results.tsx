@@ -11,6 +11,8 @@ interface SerperResult {
   result_count: number;
   error_message: string | null;
   file_url: string | null;
+  file_size: number;
+  credits_used: number;
   created_at: string;
 }
 
@@ -66,6 +68,14 @@ export default function Results() {
     }
   };
 
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+  };
+
   const closeToast = () => {
     setShowToast(false);
   };
@@ -96,18 +106,22 @@ export default function Results() {
               <div className="flex items-center space-x-3">
                 {getStatusIcon(result.status)}
                 <div>
-                  <p className="text-sm text-gray-800">{result.file_name}</p>
-                  <p className="text-xs text-gray-500">
-                    Created {new Date(result.created_at).toLocaleString()}
-                  </p>
+                  <p className="text-sm font-medium text-gray-800">{result.file_name}</p>
+                  <div className="text-xs text-gray-500 space-y-1">
+                    <p>Created: {new Date(result.created_at).toLocaleString()}</p>
+                    <p>Status: {result.status}</p>
+                    {result.file_size && <p>Size: {formatFileSize(result.file_size)}</p>}
+                    {result.credits_used > 0 && <p>Credits Used: {result.credits_used}</p>}
+                  </div>
                 </div>
               </div>
               <div className="flex items-center space-x-4">
                 {result.status === 'DONE' && (
                   <>
-                    <span className="text-sm text-gray-500">
-                      {result.result_count} results
-                    </span>
+                    <div className="text-sm text-gray-500 space-y-1">
+                      <p>Results: {result.result_count}</p>
+                      <p>Credits: {result.credits_used}</p>
+                    </div>
                     <a
                       href={result.file_url!}
                       download

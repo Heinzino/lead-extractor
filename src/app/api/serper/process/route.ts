@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
         resultId = body.resultId;
         const { rows } = body;
 
-        const results = await runSerper(rows);
+        const { results, creditsUsed } = await runSerper(rows);
         
         const allKeys = new Set([
             'query', 'city', 'zip', 'search_term', 'page', 'is_valid', 'maps_url'
@@ -44,6 +44,8 @@ export async function POST(request: NextRequest) {
         
         const csvContent = resultsHeader + resultsRows;
 
+        const fileSize = new TextEncoder().encode(csvContent).length;
+
         const fileName = `serper-results/${resultId}.csv`;
         const { error: uploadError } = await supabaseAdmin.storage
             .from('serper-results')
@@ -66,6 +68,8 @@ export async function POST(request: NextRequest) {
                 status: 'DONE',
                 file_url: publicUrl,
                 result_count: results.length,
+                file_size: fileSize,
+                credits_used: creditsUsed,
                 updated_at: new Date().toISOString()
             })
             .eq('id', resultId);

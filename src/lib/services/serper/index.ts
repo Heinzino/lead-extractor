@@ -2,10 +2,11 @@ import type { SerperPlace, SerperQueryRow, SerperResponse } from './types';
 import { serperConfig } from './config';
 import { normalizeText, chunk } from './utils';
 
-async function fetchPlaces(row: SerperQueryRow): Promise<SerperPlace[]> {
+async function fetchPlaces(row: SerperQueryRow): Promise<{ places: SerperPlace[], creditsUsed: number }> {
     const searchTerm = `${normalizeText(row.query)} in ${normalizeText(row.city)} ${row.zip}`;
     let page = 1;
     const collected: SerperPlace[] = [];
+    let creditsUsed = 0;
 
     while (page <= serperConfig.maxPages) {
         const payload = {
@@ -23,6 +24,8 @@ async function fetchPlaces(row: SerperQueryRow): Promise<SerperPlace[]> {
                 },
                 body: JSON.stringify(payload)
             });
+
+            creditsUsed++;
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
@@ -57,6 +60,10 @@ async function fetchPlaces(row: SerperQueryRow): Promise<SerperPlace[]> {
                 collected.push(entry);
             }
 
+            if (places.length < 10) {
+                break;
+            }
+
             page++;
         } catch (error) {
             console.error(`❌ Error on page ${page}:`, error);
@@ -64,18 +71,23 @@ async function fetchPlaces(row: SerperQueryRow): Promise<SerperPlace[]> {
         }
     }
 
-    return collected;
+    return { places: collected, creditsUsed };
 }
 
-export async function runSerper(rows: SerperQueryRow[]): Promise<SerperPlace[]> {
+export async function runSerper(rows: SerperQueryRow[]): Promise<{ results: SerperPlace[], creditsUsed: number }> {
     const results: SerperPlace[] = [];
     const seenCids = new Set<string>();
+    let totalCreditsUsed = 0;
     // LIMITING TO FIRST 10 LINES FOR TEST PURPOSES
     rows = rows.slice(0, 10);
     const chunks = chunk(rows, serperConfig.maxWorkers);
 
     for (const chunk of chunks) {
-        const chunkPromises = chunk.map((row: SerperQueryRow) => fetchPlaces(row));
+        const chunkPromises = chunk.map(async (row: SerperQueryRow) => {
+            const { places, creditsUsed } = await fetchPlaces(row);
+            totalCreditsUsed += creditsUsed;
+            return places;
+        });
         const chunkResults = await Promise.all(chunkPromises);
         
         const validResults = chunkResults
@@ -93,5 +105,5 @@ export async function runSerper(rows: SerperQueryRow[]): Promise<SerperPlace[]> 
         await new Promise(resolve => setTimeout(resolve, serperConfig.batchDelay));
     }
 
-    return results;
+    return { results, creditsUsed: totalCreditsUsed };
 } 
