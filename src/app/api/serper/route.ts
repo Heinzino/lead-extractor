@@ -57,8 +57,6 @@ export async function POST(request: NextRequest) {
         const body = await request.json();
         const { q, location, page } = body;
 
-        console.log('Making request to Serper with:', { q, location, page });
-
         const response = await fetchWithRetry(ENDPOINT, {
             method: 'POST',
             headers: {

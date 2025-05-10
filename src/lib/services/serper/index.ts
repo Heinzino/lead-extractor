@@ -14,9 +14,7 @@ async function fetchPlaces(row: SerperQueryRow): Promise<SerperPlace[]> {
             ...(page > 1 ? { page } : {})
         };
 
-        try {
-            console.log(`Fetching '${searchTerm}', page ${page}/${serperConfig.maxPages}...`);
-            
+        try {            
             const response = await fetch('/api/serper', {
                 method: 'POST',
                 headers: {
@@ -35,11 +33,8 @@ async function fetchPlaces(row: SerperQueryRow): Promise<SerperPlace[]> {
             const places = data.places || [];
 
             if (!places.length) {
-                console.log(`No more places found for: ${searchTerm}`);
                 break;
             }
-
-            console.log(`→ Page ${page} returned ${places.length} places`);
 
             for (const place of places) {
                 const entry: SerperPlace = {
@@ -72,6 +67,8 @@ async function fetchPlaces(row: SerperQueryRow): Promise<SerperPlace[]> {
 export async function runSerper(rows: SerperQueryRow[]): Promise<SerperPlace[]> {
     const results: SerperPlace[] = [];
     const seenCids = new Set<string>();
+    // LIMITING TO FIRST 10 LINES FOR TEST PURPOSES
+    rows = rows.slice(0, 10);
     const chunks = chunk(rows, serperConfig.maxWorkers);
 
     for (const chunk of chunks) {

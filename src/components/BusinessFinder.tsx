@@ -4,7 +4,7 @@ import FileUploaderBox from './FileUploaderBox';
 import Button from './Button';
 import Toast from './Toast';
 import { supabase } from '@/lib/supabase/supabaseClient';
-import { runSerper } from '@/lib/services/serper';
+import { runSerper } from '@/lib/services/serper/index';
 
 export default function BusinessFinder() {
   const [citiesFile, setCitiesFile] = useState<File | null>(null);
@@ -157,13 +157,8 @@ export default function BusinessFinder() {
     }
 
     setIsGenerating(true);
-    try {
-      console.log('Starting Serper queries process');
-      
-     
-      const combinedText = await combinedFile.text();
-      console.log('Read combined file:', combinedText.substring(0, 100) + '...');
-      
+    try {      
+      const combinedText = await combinedFile.text();      
       const rows = combinedText
         .split('\n')
         .slice(1)
@@ -172,14 +167,8 @@ export default function BusinessFinder() {
           const [query, city, state, zip] = line.split(',').map(s => s.trim());
           return { query, city, state, zip };
         });
-
-      console.log('Parsed rows:', rows.length);
-
      
       const results = await runSerper(rows);
-
-      console.log('All queries completed, generating CSV');
-
      
       const allKeys = new Set([
         'query', 'city', 'zip', 'search_term', 'page', 'is_valid', 'maps_url'
