@@ -10,7 +10,6 @@ export default function FileUploaderBox({handleFileUpload, isUploading, file, ty
         e.preventDefault();
         setIsDragging(false);
         if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-          console.log('type', type);
           handleFileUpload(e.dataTransfer.files[0], type);
         }
       }, [handleFileUpload, type]);
@@ -32,7 +31,6 @@ export default function FileUploaderBox({handleFileUpload, isUploading, file, ty
     
     const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
-          console.log('type', type);
           handleFileUpload(e.target.files[0], type);
         }
       }, [handleFileUpload, type]);

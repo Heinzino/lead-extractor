@@ -41,8 +41,6 @@ export default function Home() {
     fetchTestData();
   }, []);
 
-  console.log('data', data)
-
   return (
     <div className="flex h-screen">
       <Sidebar setActivePage={setActivePage} />

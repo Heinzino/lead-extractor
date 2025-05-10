@@ -6,7 +6,6 @@ import { useAuth } from '../context/AuthContext';
 export function ProtectedRoute({ children }: { children: JSX.Element }) {
   const { user, loading } = useAuth();
   const router = useRouter();
-  console.log('user', user);
 
   useEffect(() => {
     if (!loading && user === null) {

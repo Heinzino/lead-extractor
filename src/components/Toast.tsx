@@ -24,8 +24,6 @@ export default function Toast({ message, type = "success", onClose, duration = 3
     warning: "bg-white border-l-4 border-l-yellow-500"
   };
 
-  console.log('message', message);
-
   return (
     <div className="fixed top-4 right-4 z-50 animate-fade-in">
       <div className={`p-4 rounded-lg shadow-lg ${bgColors[type]} flex items-center max-w-md`}>
