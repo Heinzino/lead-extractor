@@ -15,9 +15,10 @@ async function fetchPlaces(row: SerperQueryRow): Promise<SerperPlace[]> {
         };
 
         try {            
-            const response = await fetch('/api/serper', {
+            const response = await fetch('https://google.serper.dev/places', {
                 method: 'POST',
                 headers: {
+                    'X-API-KEY': process.env.SERP_API_KEY || '',
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(payload)

@@ -1,0 +1,97 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase/supabaseAdmin';
+import { runSerper } from '@/lib/services/serper';
+
+export async function POST(request: NextRequest) {
+    let resultId: string | undefined;
+    
+    try {
+        const body = await request.json();
+        if (!body || !body.resultId || !body.rows) {
+            return NextResponse.json(
+                { error: 'Missing required fields: resultId and rows' },
+                { status: 400 }
+            );
+        }
+
+        resultId = body.resultId;
+        const { rows } = body;
+
+        const results = await runSerper(rows);
+        
+        const allKeys = new Set([
+            'query', 'city', 'zip', 'search_term', 'page', 'is_valid', 'maps_url'
+        ]);
+
+        results.forEach(result => {
+            Object.keys(result).forEach(key => allKeys.add(key));
+        });
+
+        const headers = [
+            'query', 'city', 'zip', 'search_term', 'page', 'is_valid', 'maps_url'
+        ].concat(Array.from(allKeys)
+            .filter(k => !['query', 'city', 'zip', 'search_term', 'page', 'is_valid', 'maps_url'].includes(k))
+            .sort()
+        );
+
+        const resultsHeader = headers.join(',') + '\n';
+        const resultsRows = results.map(result => 
+            headers.map(header => {
+                const value = result[header] ?? '';
+                return `"${String(value).replace(/"/g, '""')}"`;
+            }).join(',')
+        ).join('\n');
+        
+        const csvContent = resultsHeader + resultsRows;
+
+        const fileName = `serper-results/${resultId}.csv`;
+        const { error: uploadError } = await supabaseAdmin.storage
+            .from('serper-results')
+            .upload(fileName, csvContent, {
+                contentType: 'text/csv',
+                upsert: true
+            });
+
+        if (uploadError) {
+            throw new Error(`Error uploading file: ${uploadError.message}`);
+        }
+
+        const { data: { publicUrl } } = supabaseAdmin.storage
+            .from('serper-results')
+            .getPublicUrl(fileName);
+
+        const { error: updateError } = await supabaseAdmin
+            .from('serper_results')
+            .update({
+                status: 'DONE',
+                file_url: publicUrl,
+                result_count: results.length,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', resultId);
+
+        if (updateError) {
+            throw new Error(`Error updating record: ${updateError.message}`);
+        }
+
+        return NextResponse.json({ success: true });
+    } catch (error) {
+        console.error('Error processing Serper queries:', error);
+        
+        if (resultId) {
+            await supabaseAdmin
+                .from('serper_results')
+                .update({
+                    status: 'ERROR',
+                    error_message: error instanceof Error ? error.message : 'Unknown error',
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', resultId);
+        }
+
+        return NextResponse.json(
+            { error: error instanceof Error ? error.message : 'Unknown error' },
+            { status: 500 }
+        );
+    }
+} 

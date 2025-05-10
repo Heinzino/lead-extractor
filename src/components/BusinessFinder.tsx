@@ -4,7 +4,6 @@ import FileUploaderBox from './FileUploaderBox';
 import Button from './Button';
 import Toast from './Toast';
 import { supabase } from '@/lib/supabase/supabaseClient';
-import { runSerper } from '@/lib/services/serper/index';
 
 export default function BusinessFinder() {
   const [citiesFile, setCitiesFile] = useState<File | null>(null);
@@ -149,9 +148,7 @@ export default function BusinessFinder() {
   }, [citiesFile, queriesFile]);
 
   const generateFileName = (rows: { query: string }[]) => {
-    // Get unique queries from the first few rows
     const queries = [...new Set(rows.slice(0, 10).map(row => row.query))];
-    // Clean up query names (remove "in" and special characters)
     const cleanQueries = queries.map(q => 
       q.toLowerCase()
         .replace(/\s+in\s+/g, '')
@@ -159,9 +156,7 @@ export default function BusinessFinder() {
         .replace(/-+/g, '-')
         .replace(/^-|-$/g, '')
     );
-    // Join queries and add timestamp
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    return `${cleanQueries.join('-')}-${timestamp}`;
+    return cleanQueries.join('-');
   };
 
   const handleSerperQueries = useCallback(async () => {
@@ -186,7 +181,7 @@ export default function BusinessFinder() {
           return { query, city, state, zip };
         });
      
-      // Create initial record with RUNNING status
+
       const { data: user } = await supabase.auth.getUser();
       if (!user.user) {
         throw new Error('User not authenticated');
@@ -209,86 +204,24 @@ export default function BusinessFinder() {
 
       resultId = result.id;
 
-      // Run the queries
-      const results = await runSerper(rows);
-     
-      const allKeys = new Set([
-        'query', 'city', 'zip', 'search_term', 'page', 'is_valid', 'maps_url'
-      ]);
-
-      results.forEach(result => {
-        Object.keys(result).forEach(key => allKeys.add(key));
+      fetch('/api/serper/process', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          resultId,
+          rows
+        })
+      }).catch(error => {
+        console.error('Error starting background processing:', error);
       });
 
-      const headers = [
-        'query', 'city', 'zip', 'search_term', 'page', 'is_valid', 'maps_url'
-      ].concat(Array.from(allKeys)
-        .filter(k => !['query', 'city', 'zip', 'search_term', 'page', 'is_valid', 'maps_url'].includes(k))
-        .sort()
-      );
-
-      const resultsHeader = headers.join(',') + '\n';
-      const resultsRows = results.map(result => 
-        headers.map(header => {
-          const value = result[header] ?? '';
-          return `"${String(value).replace(/"/g, '""')}"`;
-        }).join(',')
-      ).join('\n');
-      
-      const resultsContent = resultsHeader + resultsRows;
-      const blob = new Blob([resultsContent], { type: 'text/csv' });
-
-      // Upload file to Supabase Storage
-      const filePath = `${user.user.id}/${fileName}.csv`;
-      const { error: uploadError } = await supabase.storage
-        .from('serper-results')
-        .upload(filePath, blob, {
-          contentType: 'text/csv',
-          upsert: true
-        });
-
-      if (uploadError) {
-        throw new Error(`Error uploading file: ${uploadError.message}`);
-      }
-
-      // Get public URL for the file
-      const { data: { publicUrl } } = supabase.storage
-        .from('serper-results')
-        .getPublicUrl(filePath);
-
-      // Update record with DONE status, result count, and file path
-      const { error: updateError } = await supabase
-        .from('serper_results')
-        .update({
-          status: 'DONE',
-          result_count: results.length,
-          file_path: filePath,
-          file_url: publicUrl,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', resultId);
-
-      if (updateError) {
-        throw new Error(`Error updating result record: ${updateError.message}`);
-      }
-
-      // Download file
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${fileName}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-
-      setToastMessage(`Serper queries completed successfully. Found ${results.length} unique businesses.`);
-      setToastType('success');
-      setShowToast(true);
+      window.location.href = '/?page=Results&status=processing';
     } catch (error) {
-      console.error('Error running Serper queries:', error);
+      console.error('Error starting Serper queries:', error);
       
-      // Update record with ERROR status if we have a resultId
+
       if (resultId) {
         await supabase
           .from('serper_results')
@@ -300,7 +233,7 @@ export default function BusinessFinder() {
           .eq('id', resultId);
       }
 
-      setToastMessage(error instanceof Error ? error.message : 'Error running Serper queries');
+      setToastMessage(error instanceof Error ? error.message : 'Error starting Serper queries');
       setToastType('error');
       setShowToast(true);
     } finally {
@@ -512,9 +445,6 @@ export default function BusinessFinder() {
           )}
         </div>
         <div className="w-full flex flex-col items-center mt-16">
-          <p className="text-sm text-amber-600/50 mb-4">
-            This might take a few minutes depending on your file size.
-          </p>
           <Button
             text="Run Serper Queries"
             onClick={handleSerperQueries}
