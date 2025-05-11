@@ -1,7 +1,7 @@
 "use client";
 import { useState } from 'react';; 
-import Results from '@/components/Results';
-import BusinessFinder from '@/components/BusinessFinder';
+import Results from '../components/Results';
+import BusinessFinder from '../components/BusinessFinder';
 import ContactFinder from '@/components/ContactFinder';
 import Settings from '@/components/Settings';
 import Sidebar from '@/components/Sidebar';

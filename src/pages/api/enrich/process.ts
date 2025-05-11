@@ -1,5 +1,5 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { supabaseAdmin } from '@/lib/supabase/supabaseAdmin';
+import { supabaseAdmin } from '../../../lib/supabase/supabaseAdmin';
 import { stringify } from 'csv-stringify/sync';
 
 
