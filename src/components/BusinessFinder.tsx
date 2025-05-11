@@ -104,7 +104,6 @@ export default function BusinessFinder() {
           throw new Error(`Error fetching zip codes: ${error.message}`);
         }
 
-       
         for (const query of queries) {
           for (const { zip } of zipCodes) {
             combinedRows.push({
