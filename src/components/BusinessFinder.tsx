@@ -12,7 +12,8 @@ export default function BusinessFinder() {
   const [isUploadingCities, setIsUploadingCities] = useState(false);
   const [isUploadingQueries, setIsUploadingQueries] = useState(false);
   const [isUploadingCombined, setIsUploadingCombined] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [isGeneratingCombined, setIsGeneratingCombined] = useState(false);
+  const [isRunningSerper, setIsRunningSerper] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<"success" | "error" | "warning">('success');
@@ -70,7 +71,7 @@ export default function BusinessFinder() {
       return;
     }
 
-    setIsGenerating(true);
+    setIsGeneratingCombined(true);
     try {
       const citiesText = await citiesFile.text();
       const queriesText = await queriesFile.text();
@@ -143,7 +144,7 @@ export default function BusinessFinder() {
       setToastType('error');
       setShowToast(true);
     } finally {
-      setIsGenerating(false);
+      setIsGeneratingCombined(false);
     }
   }, [citiesFile, queriesFile]);
 
@@ -167,7 +168,7 @@ export default function BusinessFinder() {
       return;
     }
 
-    setIsGenerating(true);
+    setIsRunningSerper(true);
     let resultId: string | null = null;
     
     try {      
@@ -240,7 +241,7 @@ export default function BusinessFinder() {
       setToastType('error');
       setShowToast(true);
     } finally {
-      setIsGenerating(false);
+      setIsRunningSerper(false);
     }
   }, [combinedFile]);
 
@@ -394,8 +395,8 @@ export default function BusinessFinder() {
           <Button
             text="Generate Combined CSV"
             onClick={handleGenerate}
-            disabled={isGenerating || !citiesFile || !queriesFile}
-            isLoading={isGenerating}
+            disabled={isGeneratingCombined || !citiesFile || !queriesFile}
+            isLoading={isGeneratingCombined}
             width={48}
             height={16}
           />
@@ -451,8 +452,8 @@ export default function BusinessFinder() {
           <Button
             text="Run Serper Queries"
             onClick={handleSerperQueries}
-            disabled={isGenerating || !combinedFile}
-            isLoading={isGenerating}
+            disabled={isRunningSerper || !combinedFile}
+            isLoading={isRunningSerper}
             width={48}
             height={16}
           />
