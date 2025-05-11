@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useCallback } from 'react';
-import { X, Download, FileText } from 'lucide-react';
+import { X, Download, FileText, Youtube } from 'lucide-react';
 import Button from './Button';
 import Toast from './Toast';
 import FileUploaderBox from './FileUploaderBox';
+import YouTubeModal from './YouTubeModal';
 import { supabase } from '../lib/supabase/supabaseClient';
 
 export default function ContactFinder() {
@@ -16,6 +17,7 @@ export default function ContactFinder() {
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<"success" | "error" | "warning">('success');
   const [hasUploadError, setHasUploadError] = useState(false);
+  const [isTutorialOpen, setIsTutorialOpen] = useState(false);
 
   const handleFileUpload = useCallback((uploadedFile: File) => {
     if (!uploadedFile.name.endsWith('.csv')) {
@@ -116,13 +118,26 @@ export default function ContactFinder() {
       )}
       
       <div className="mb-8">
-        <div className="flex items-center mb-2">
+        <div className="flex flex-col mb-2">
           <h1 className="text-2xl font-bold">Contact Finder</h1>
+          <button
+            onClick={() => setIsTutorialOpen(true)}
+            className="flex items-center text-blue-600 hover:text-blue-800 transition-colors mt-2 w-fit"
+          >
+            <Youtube className="w-5 h-5 mr-1" />
+            <span className="underline">Tutorial</span>
+          </button>
         </div>
         <p className="text-gray-500">
           Upload a CSV with companies and websites. We&apos;ll enrich it with decision maker info and emails.
         </p>
       </div>
+
+      <YouTubeModal
+        isOpen={isTutorialOpen}
+        onClose={() => setIsTutorialOpen(false)}
+        videoId="ZEFLcPjxw6w"
+      />
 
       <div className="space-y-8">
         <div className="space-y-3">

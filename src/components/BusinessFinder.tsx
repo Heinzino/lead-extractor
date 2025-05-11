@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
-import { Download, FileText, X } from 'lucide-react';
+import { Download, FileText, X, Youtube } from 'lucide-react';
 import FileUploaderBox from './FileUploaderBox';
 import Button from './Button';
 import Toast from './Toast';
+import YouTubeModal from './YouTubeModal';
 import { supabase } from '../lib/supabase/supabaseClient';
 
 export default function BusinessFinder() {
@@ -18,6 +19,7 @@ export default function BusinessFinder() {
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<"success" | "error" | "warning">('success');
   const [hasUploadError, setHasUploadError] = useState(false);
+  const [isTutorialOpen, setIsTutorialOpen] = useState(false);
 
   const handleFileUpload = useCallback((file: File, type: 'cities' | 'queries' | 'businesses' | 'combined') => {
     if (!file.name.endsWith('.csv')) {
@@ -271,13 +273,26 @@ export default function BusinessFinder() {
       )}
 
       <div className="mb-8">
-        <div className="flex items-center mb-2">
+        <div className="flex flex-col mb-2">
           <h1 className="text-2xl font-bold">Business Finder</h1>
+          <button
+            onClick={() => setIsTutorialOpen(true)}
+            className="flex items-center text-blue-600 hover:text-blue-800 transition-colors mt-2 w-fit"
+          >
+            <Youtube className="w-5 h-5 mr-1" />
+            <span className="underline">Tutorial</span>
+          </button>
         </div>
         <p className="text-gray-500">
           Upload two CSV files: one with cities and one with queries. We&apos;ll combine them into a single CSV.
         </p>
       </div>
+
+      <YouTubeModal
+        isOpen={isTutorialOpen}
+        onClose={() => setIsTutorialOpen(false)}
+        videoId="ZEFLcPjxw6w"
+      />
 
       <div className="space-y-8">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
