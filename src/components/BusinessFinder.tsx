@@ -17,6 +17,7 @@ export default function BusinessFinder() {
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<"success" | "error" | "warning">('success');
+  const [hasUploadError, setHasUploadError] = useState(false);
 
   const handleFileUpload = useCallback((file: File, type: 'cities' | 'queries' | 'businesses' | 'combined') => {
     if (!file.name.endsWith('.csv')) {
@@ -28,32 +29,33 @@ export default function BusinessFinder() {
 
     if (type === 'cities') {
       setIsUploadingCities(true);
-      setTimeout(() => {
-        setCitiesFile(file);
-        setIsUploadingCities(false);
-        setToastMessage('Cities file uploaded successfully');
-        setToastType('success');
-        setShowToast(true);
-      }, 1000);
+      setCitiesFile(file);
+      setIsUploadingCities(false);
+      setToastMessage('Cities file uploaded successfully');
+      setToastType('success');
+      setShowToast(true);
     } else if (type === 'combined') {
       setIsUploadingCombined(true);
-      setTimeout(() => {
-        setCombinedFile(file);
-        setIsUploadingCombined(false);
-        setToastMessage('Combined CSV file uploaded successfully');
-        setToastType('success');
-        setShowToast(true);
-      }, 1000);
+      setCombinedFile(file);
+      setIsUploadingCombined(false);
+      setToastMessage('Combined CSV file uploaded successfully');
+      setToastType('success');
+      setShowToast(true);
     } else if (type === 'queries') {
       setIsUploadingQueries(true);
-      setTimeout(() => {
-        setQueriesFile(file);
-        setIsUploadingQueries(false);
-        setToastMessage('Queries file uploaded successfully');
-        setToastType('success');
-        setShowToast(true);
-      }, 1000);
+      setQueriesFile(file);
+      setIsUploadingQueries(false);
+      setToastMessage('Queries file uploaded successfully');
+      setToastType('success');
+      setShowToast(true);
     }
+  }, []);
+
+  const handleValidationError = useCallback((error: string) => {
+    setHasUploadError(true);
+    setToastMessage(error);
+    setToastType('error');
+    setShowToast(true);
   }, []);
 
   const downloadSampleFile = useCallback((fileName: string) => {
@@ -291,6 +293,7 @@ export default function BusinessFinder() {
               isUploading={isUploadingCities}
               file={citiesFile}
               type={'cities'}
+              onValidationError={handleValidationError}
             />
             {citiesFile && (
               <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mt-4">
@@ -346,6 +349,7 @@ export default function BusinessFinder() {
               isUploading={isUploadingQueries}
               file={queriesFile}
               type={'queries'}
+              onValidationError={handleValidationError}
             />
             {queriesFile && (
               <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mt-4">
@@ -412,6 +416,7 @@ export default function BusinessFinder() {
             isUploading={isUploadingCombined}
             file={combinedFile}
             type={'combined'}
+            onValidationError={handleValidationError}
           />
           {combinedFile && (
             <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mt-4">
@@ -451,7 +456,7 @@ export default function BusinessFinder() {
           <Button
             text="Run Serper Queries"
             onClick={handleSerperQueries}
-            disabled={isRunningSerper || !combinedFile}
+            disabled={isRunningSerper || !combinedFile || hasUploadError}
             isLoading={isRunningSerper}
             width={48}
             height={16}
