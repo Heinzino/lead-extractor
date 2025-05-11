@@ -1,5 +1,5 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { supabaseAdmin } from '@/lib/supabase/supabaseAdmin';
+import { supabaseAdmin } from '../../lib/supabase/supabaseAdmin';
 import { parse } from 'csv-parse/sync';
 import formidable from 'formidable';
 import { promises as fs } from 'fs';

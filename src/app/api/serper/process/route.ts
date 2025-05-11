@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/supabaseAdmin';
-import { runSerper } from '@/lib/services/serper';
+import { runSerper } from '../../../../lib/services/serper/index';
 
 export async function POST(request: NextRequest) {
     let resultId: string | undefined;
@@ -17,8 +17,7 @@ export async function POST(request: NextRequest) {
         resultId = body.resultId;
         const { rows } = body;
 
-        // Start the process in the background
-        (async () => {
+        void (async () => {
             try {
                 const { results, creditsUsed } = await runSerper(rows);
                 
@@ -96,7 +95,25 @@ export async function POST(request: NextRequest) {
             }
         })();
 
-        // Return immediately
+        process.on('SIGTERM', async () => {
+            console.log('Received SIGTERM signal');
+            if (resultId) {
+                try {
+                    await supabaseAdmin
+                        .from('serper_results')
+                        .update({
+                            status: 'ERROR',
+                            error_message: 'Process terminated',
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', resultId);
+                } catch (error) {
+                    console.error('Error updating status on termination:', error);
+                }
+            }
+            process.exit(0);
+        });
+
         return NextResponse.json({ success: true });
     } catch (error) {
         console.error('Error starting Serper process:', error);
