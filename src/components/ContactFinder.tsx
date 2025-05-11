@@ -15,7 +15,7 @@ export default function ContactFinder() {
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<"success" | "error" | "warning">('success');
-
+  const [hasUploadError, setHasUploadError] = useState(false);
 
   const handleFileUpload = useCallback((uploadedFile: File) => {
     if (!uploadedFile.name.endsWith('.csv')) {
@@ -25,14 +25,18 @@ export default function ContactFinder() {
       return;
     }
     setIsUploading(true);
-    
-    setTimeout(() => {
-      setFile(uploadedFile);
-      setIsUploading(false);
-      setToastMessage('File uploaded successfully');
-      setToastType('success');
-      setShowToast(true);
-    }, 1000);
+    setFile(uploadedFile);
+    setIsUploading(false);
+    setToastMessage('File uploaded successfully');
+    setToastType('success');
+    setShowToast(true);
+  }, []);
+
+  const handleValidationError = useCallback((error: string) => {
+    setHasUploadError(true);
+    setToastMessage(error);
+    setToastType('error');
+    setShowToast(true);
   }, []);
 
   const removeFile = useCallback(() => {
@@ -129,10 +133,11 @@ export default function ContactFinder() {
             Upload CSV File
           </label>
           <FileUploaderBox
-          handleFileUpload={handleFileUpload}
-          isUploading={isUploading}
-          file={file}
-          type={'businesses'}
+            handleFileUpload={handleFileUpload}
+            isUploading={isUploading}
+            file={file}
+            type={'businesses'}
+            onValidationError={handleValidationError}
           />
         </div>
 
@@ -227,7 +232,7 @@ export default function ContactFinder() {
               const event = new Event('submit') as unknown as React.FormEvent;
               handleSubmit(event);
             }}
-            disabled={isEnriching || !file}
+            disabled={isEnriching || !file || hasUploadError}
             isLoading={isEnriching}
           />
         </div>
