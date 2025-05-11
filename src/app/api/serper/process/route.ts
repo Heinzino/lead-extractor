@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase/supabaseAdmin';
+import { supabaseAdmin } from '../../../../lib/supabase/supabaseAdmin';
 import { runSerper } from '../../../../lib/services/serper/index';
 
 export async function POST(request: NextRequest) {

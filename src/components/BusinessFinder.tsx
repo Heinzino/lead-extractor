@@ -3,7 +3,7 @@ import { Download, FileText, X } from 'lucide-react';
 import FileUploaderBox from './FileUploaderBox';
 import Button from './Button';
 import Toast from './Toast';
-import { supabase } from '@/lib/supabase/supabaseClient';
+import { supabase } from '../lib/supabase/supabaseClient';
 
 export default function BusinessFinder() {
   const [citiesFile, setCitiesFile] = useState<File | null>(null);

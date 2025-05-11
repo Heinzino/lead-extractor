@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Clock, CheckCircle, XCircle, Download } from 'lucide-react';
-import { supabase } from '@/lib/supabase/supabaseClient';
+import { supabase } from '../lib/supabase/supabaseClient';
 import Toast from './Toast';
 
 interface SerperResult {
