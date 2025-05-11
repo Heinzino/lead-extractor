@@ -35,6 +35,16 @@ export default function FileUploaderBox({handleFileUpload, isUploading, file, ty
         }
       }, [handleFileUpload, type]);
 
+    const getTitle = () => {
+      switch(type) {
+        case 'cities': return 'CITIES';
+        case 'queries': return 'QUERIES';
+        case 'combined': return 'COMBINED CSV';
+        case 'businesses': return 'COMPANIES AND WEBSITES';
+        default: return '';
+      }
+    };
+
     return (
         <div
         className={`
@@ -57,6 +67,7 @@ export default function FileUploaderBox({handleFileUpload, isUploading, file, ty
           </div>
         ) : (
           <>
+            <p className="text-2xl font-bold mb-4">{getTitle()}</p>
             <div className="bg-white rounded-full p-3 mb-4">
               <Upload 
                 className="w-10 h-10 text-accentBlue" 
