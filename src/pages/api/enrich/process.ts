@@ -34,14 +34,49 @@ const PPLX_MODEL = 'sonar-pro';
 const PPLX_COST_PER_1K_TOKENS = 0.002;
 
 
-function chunk<T>(array: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < array.length; i += size) {
-    chunks.push(array.slice(i, i + size));
+function normalizeDomain(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.replace('www.', '');
+  } catch {
+    return url.replace('www.', '');
   }
-  return chunks;
 }
 
+function cleanName(name: string): string {
+  return name
+    .replace(/\[\d+\]/g, '')
+    .replace(/\[.*?\]/g, '')
+    .trim()
+    .replace(/[.,]+$/, '');
+}
+
+function cleanEmail(email: string): string {
+  return email
+    .replace(/\[.*?\]/g, '')
+    .trim()
+    .replace(/[.,]+$/, '');
+}
+
+function generatePrompt(company: string, domain: string, jobTitle: string) {
+  const user = `Hello, can you help me find the person who holds the jobtitle: ${jobTitle} at company: ${company} which has website: ${domain}?
+
+IMPORTANT: 
+Only return a person's full name if you are at least 95% confident that the individual actually holds the job title requested. 
+If you cannot confidently verify this match, return "na" instead.`.trim();
+  const system = `Please return ONLY the full name of the person matching the requested job title if you are at least 95% confident they hold it. 
+If you are not 95% confident, return 'na'. 
+Return nothing else.`.trim();
+  return { user, system };
+}
+
+function generateFallbackPrompt(domain: string) {
+  const user = `For the company website ${domain}, please try to identify a contact email address found on the website. Please return a cleaned email address and nothing else.
+
+If email is not found return na.`.trim();
+  const system = `The only thing that should ever be outputted is an email if it was found or "na".`.trim();
+  return { user, system };
+}
 
 async function waitForPerplexityToken(): Promise<void> {
   const now = Date.now();
@@ -79,43 +114,6 @@ async function waitForFindymailToken(): Promise<void> {
   }
 
   findymailTokens--;
-}
-
-function normalizeDomain(url: string): string {
-  try {
-    const parsed = new URL(url);
-    return parsed.hostname.replace('www.', '');
-  } catch {
-    return url.replace('www.', '');
-  }
-}
-
-function cleanName(name: string): string {
-  return name.replace(/\[.*?\]/g, '').replace(/[.,]+$/, '').trim();
-}
-
-function cleanEmail(email: string): string {
-  return email.replace(/\[.*?\]/g, '').replace(/[.,]+$/, '').trim();
-}
-
-function generatePrompt(company: string, domain: string, jobTitle: string) {
-  const user = `Hello, can you help me find the person who holds the jobtitle: ${jobTitle} at company: ${company} which has website: ${domain}?
-
-IMPORTANT:
-Only return a person's full name if you are at least 95% confident that the individual actually holds the job title requested.
-If you cannot confidently verify this match, return \"na\" instead.`;
-  const system = `Please return ONLY the full name of the person matching the requested job title if you are at least 95% confident they hold it.
-If you are not 95% confident, return 'na'.
-Return nothing else.`;
-  return { user, system };
-}
-
-function generateFallbackPrompt(domain: string) {
-  const user = `For the company website ${domain}, please try to identify a contact email address found on the website. Please return a cleaned email address and nothing else.
-
-If email is not found return na.`;
-  const system = `The only thing that should ever be outputted is an email if it was found or \"na\".`;
-  return { user, system };
 }
 
 async function callPerplexity(user: string, system: string) {
@@ -169,6 +167,15 @@ async function callFindymail(name: string, domain: string) {
 interface EnrichRow {
   'Company name': string;
   'Company website': string;
+  'Normalized Domain': string;
+  'Desired Job Title': string;
+  'Found Person Name': string;
+  'Total Cost': string;
+  'Annotation': string;
+  'Attempts': number;
+  'Person Email': string;
+  'Website Email': string;
+  'Final Email': string;
   [key: string]: string | number;
 }
 
@@ -184,7 +191,7 @@ async function processRow(row: EnrichRow, jobTitle: string) {
   for (let i = 0; i < CONFIG.maxRetries; i++) {
     try {
       const result = await callPerplexity(user, system);
-      content = cleanName(result.content);
+      content = result.content;
       cost = result.cost;
       status = result.status;
       break;
@@ -194,27 +201,48 @@ async function processRow(row: EnrichRow, jobTitle: string) {
     attempts++;
   }
 
+  const names = content.toLowerCase() === 'na' ? ['na'] : cleanName(content).split(',').map(n => n.trim());
+  return names.map(name => ({
+    ...row,
+    'Normalized Domain': domain,
+    'Desired Job Title': jobTitle,
+    'Found Person Name': name,
+    'Total Cost': cost.toFixed(6),
+    'Annotation': status,
+    'Attempts': attempts + 1,
+  }));
+}
+
+async function enrichRow(row: EnrichRow) {
+  const name = row['Found Person Name'];
+  const domain = row['Normalized Domain'];
+  
   let personEmail = 'na';
   let websiteEmail = 'na';
 
-  if (content && content.toLowerCase() !== 'na') {
-    personEmail = cleanEmail(await callFindymail(content, domain));
+  if (name.toLowerCase() !== 'na') {
+    personEmail = await callFindymail(name, domain);
   }
 
   if (!personEmail || personEmail.toLowerCase() === 'na') {
     const fallback = generateFallbackPrompt(domain);
-    const fallbackResult = await callPerplexity(fallback.user, fallback.system);
-    websiteEmail = cleanEmail(fallbackResult.content);
+    for (let i = 0; i < 3; i++) {
+      try {
+        const fallbackResult = await callPerplexity(fallback.user, fallback.system);
+        if (fallbackResult.status === 'success' && 
+            fallbackResult.content.includes('@') && 
+            fallbackResult.content.includes('.')) {
+          websiteEmail = cleanEmail(fallbackResult.content);
+          break;
+        }
+      } catch {
+        await new Promise(r => setTimeout(r, 2 ** i * CONFIG.retryDelay));
+      }
+    }
   }
 
   return {
     ...row,
-    'Normalized Domain': domain,
-    'Desired Job Title': jobTitle,
-    'Found Person Name': content,
-    'Total Cost': cost.toFixed(6),
-    'Annotation': status,
-    'Attempts': attempts + 1,
     'Person Email': personEmail,
     'Website Email': websiteEmail,
     'Final Email': personEmail !== 'na' ? personEmail : websiteEmail,
@@ -236,28 +264,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     resultId = id;
-    const enrichedRows: EnrichRow[] = [];
 
-    const tasks = [];
-    for (const row of records) {
-      for (const jobTitle of jobTitles) {
-        tasks.push({ row, jobTitle });
-      }
-    }
+    const expandedRows = records.flatMap((row: EnrichRow) => 
+      jobTitles.map((jobTitle: string) => ({
+        ...row,
+        'Normalized Domain': normalizeDomain(row['Company website']),
+        'Desired Job Title': jobTitle
+      }))
+    );
 
-    const chunks = chunk(tasks, CONFIG.maxWorkers);
-    
-    for (const chunk of chunks) {
-      const chunkPromises = chunk.map(({ row, jobTitle }) => processRow(row, jobTitle));
-      const chunkResults = await Promise.all(chunkPromises);
-      enrichedRows.push(...chunkResults);
-      await new Promise(resolve => setTimeout(resolve, CONFIG.batchDelay));
-    }
+    const nameResults = await Promise.all(
+      expandedRows.map((row: EnrichRow) => processRow(row, row['Desired Job Title']))
+    );
+    const flattenedNameResults = nameResults.flat();
 
-    const output = stringify(enrichedRows, { header: true });
+    const uniqueNameResults = flattenedNameResults
+      .filter(row => String(row['Found Person Name']).toLowerCase() !== 'na')
+      .filter((row, index, self) => 
+        index === self.findIndex(r => r['Found Person Name'] === row['Found Person Name'])
+      );
+
+    const enrichedResults = await Promise.all(
+      uniqueNameResults.map((row: EnrichRow) => enrichRow(row))
+    );
+
+    const output = stringify(enrichedResults, { header: true });
     const fileSize = new TextEncoder().encode(output).length;
     const fileName = `enrich-results/${resultId}.csv`;
-    
+
     const { data: buckets } = await supabaseAdmin.storage.listBuckets();
     const bucketExists = buckets?.some(b => b.name === 'enrich-results');
     
@@ -303,7 +337,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .update({
         status: 'DONE',
         file_url: data.signedUrl,
-        result_count: enrichedRows.length,
+        result_count: enrichedResults.length,
         file_size: fileSize,
         updated_at: new Date().toISOString()
       })
