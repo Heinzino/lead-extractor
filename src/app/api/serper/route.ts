@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const ENDPOINT = "https://google.serper.dev/places";
 const MAX_RETRIES = 3;
-const RETRY_DELAY = 500
-const RATE_LIMIT = 5
-const RATE_LIMIT_WINDOW = 1000
+const RETRY_DELAY = 500;
+const RATE_LIMIT = process.env.NODE_ENV === 'production' ? 200 : 5;
+const RATE_LIMIT_WINDOW = 1100;
 
 let tokens = RATE_LIMIT;
 let lastRefill = Date.now();

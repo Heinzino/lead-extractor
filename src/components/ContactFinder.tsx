@@ -4,6 +4,7 @@ import { X, Download, FileText } from 'lucide-react';
 import Button from './Button';
 import Toast from './Toast';
 import FileUploaderBox from './FileUploaderBox';
+import { supabase } from '@/lib/supabase/supabaseClient';
 
 export default function ContactFinder() {
   const [file, setFile] = useState<File | null>(null);
@@ -24,7 +25,7 @@ export default function ContactFinder() {
       return;
     }
     setIsUploading(true);
-    // Simulate upload delay
+    
     setTimeout(() => {
       setFile(uploadedFile);
       setIsUploading(false);
@@ -45,69 +46,56 @@ export default function ContactFinder() {
     link.click();
   }, []);
 
-const handleSubmit = useCallback(async (e: React.MouseEvent<HTMLButtonElement>) => {
-  if (e) e.preventDefault();
-
-  if (!file) {
-    setToastMessage('Please upload a CSV file first');
-    setToastType('error');
-    setShowToast(true);
-    return;
-  }
-
-  if (!jobTitles.trim()) {
-    setToastMessage('Please enter job titles');
-    setToastType('error');
-    setShowToast(true);
-    return;
-  }
-
-  if (!fileName.trim()) {
-    setToastMessage('Please enter a file name');
-    setToastType('error');
-    setShowToast(true);
-    return;
-  }
-
-  setIsEnriching(true);
-
-  try {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('jobTitles', jobTitles);
-    formData.append('fileName', fileName);
-
-    const response = await fetch('/api/enrich', {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Server error: ${response.statusText}`);
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!file || !jobTitles || !fileName) {
+      setToastMessage('Please upload a file and enter job titles');
+      setToastType('error');
+      setShowToast(true);
+      return;
     }
 
-    const blob = await response.blob();
-    const downloadUrl = window.URL.createObjectURL(blob);
+    try {
+      setIsEnriching(true);
+      setToastMessage('Uploading file...');
+      setToastType('success');
+      setShowToast(true);
 
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = `${fileName}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.URL.revokeObjectURL(downloadUrl);
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('jobTitles', jobTitles);
+      formData.append('fileName', fileName);
 
-    setToastMessage('Enrichment completed successfully');
-    setToastType('success');
-  } catch (err: any) {
-    console.error('Enrichment error:', err);
-    setToastMessage(`Enrichment failed: ${err.message}`);
-    setToastType('error');
-  } finally {
-    setShowToast(true);
-    setIsEnriching(false);
-  }
-}, [file, jobTitles, fileName]);
+      
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('You must be logged in to use this feature');
+      }
+      formData.append('userId', user.id);
+
+      const response = await fetch('/api/enrich', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to process file');
+      }
+
+      await response.json(); 
+      
+      
+      window.location.href = `/?page=Results&status=processing`;
+    } catch (error) {
+      console.error('Error:', error);
+      setToastMessage(error instanceof Error ? error.message : 'An error occurred');
+      setToastType('error');
+      setShowToast(true);
+    } finally {
+      setIsEnriching(false);
+    }
+  };
 
   const closeToast = useCallback(() => {
     setShowToast(false);
@@ -235,8 +223,10 @@ const handleSubmit = useCallback(async (e: React.MouseEvent<HTMLButtonElement>) 
         <div className="pt-2">
           <Button
             text="Enrich"
-            //@ts-expect-error fix this later
-            onClick={handleSubmit}
+            onClick={() => {
+              const event = new Event('submit') as unknown as React.FormEvent;
+              handleSubmit(event);
+            }}
             disabled={isEnriching || !file}
             isLoading={isEnriching}
           />
