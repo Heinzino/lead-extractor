@@ -1,9 +1,9 @@
 "use client";
 import { useState } from 'react';
 import { useRouter } from 'next/router';
-import { supabase } from '@/lib/supabase/supabaseClient';
-import Spinner from '@/components/Spinner';
-import Toast from '@/components/Toast';
+import { supabase } from '../../lib/supabase/supabaseClient';
+import Spinner from '../../components/Spinner';
+import Toast from '../../components/Toast';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');

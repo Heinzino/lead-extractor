@@ -4,7 +4,7 @@ import { X, Download, FileText } from 'lucide-react';
 import Button from './Button';
 import Toast from './Toast';
 import FileUploaderBox from './FileUploaderBox';
-import { supabase } from '@/lib/supabase/supabaseClient';
+import { supabase } from '../lib/supabase/supabaseClient';
 
 export default function ContactFinder() {
   const [file, setFile] = useState<File | null>(null);

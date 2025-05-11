@@ -1,10 +1,10 @@
 "use client";
 import type { AppProps } from 'next/app';
 import { useRouter } from 'next/router';
-import { AuthProvider } from '@/context/AuthContext';
-import { ProtectedRoute } from '@/components/ProtectedRoute';
-import '@/styles/globals.css';
-import { manrope } from '@/lib/fonts';
+import { AuthProvider } from '../context/AuthContext';
+import { ProtectedRoute } from '../components/ProtectedRoute';
+import '../styles/globals.css';
+import { manrope } from '../lib/fonts';
 
 const noAuthRequired = ['/login'];
 
