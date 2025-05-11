@@ -10,8 +10,8 @@ const CONFIG = {
   retryDelay: 1000,
   rateLimit: {
     perplexity: {
-      maxRequests: 2000, 
-      windowMs: 60000 
+      maxRequests: 2000,
+      windowMs: 60000
     },
     findymail: {
       maxRequests: 5,
@@ -89,7 +89,7 @@ async function waitForPerplexityToken(): Promise<void> {
   }
 
   if (perplexityTokens <= 0) {
-    const waitTime = CONFIG.rateLimit.perplexity.windowMs - (now - lastPerplexityRefill);
+    const waitTime = CONFIG.rateLimit.perplexity.windowMs - (now - lastPerplexityRefill) + 100;
     await new Promise(resolve => setTimeout(resolve, waitTime));
     return waitForPerplexityToken();
   }
