@@ -78,8 +78,12 @@ export async function runSerper(rows: SerperQueryRow[]): Promise<{ results: Serp
     const results: SerperPlace[] = [];
     const seenCids = new Set<string>();
     let totalCreditsUsed = 0;
-    // LIMITING TO FIRST 10 LINES FOR TEST PURPOSES
-    rows = rows.slice(0, 10);
+    
+    // Limit rows in development mode
+    if (process.env.NODE_ENV !== 'production') {
+        rows = rows.slice(0, 10);
+    }
+    
     const chunks = chunk(rows, serperConfig.maxWorkers);
 
     for (const chunk of chunks) {
