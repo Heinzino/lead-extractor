@@ -79,6 +79,30 @@ export async function POST(request: NextRequest) {
                 if (updateError) {
                     throw new Error(`Error updating record: ${updateError.message}`);
                 }
+
+                const { data: serperResult, error: fetchUserError } = await supabaseAdmin
+                    .from('serper_results')
+                    .select('user_id')
+                    .eq('id', resultId)
+                    .single();
+
+                if (!fetchUserError && serperResult?.user_id) {
+                    const { data: userData, error: userError } = await supabaseAdmin
+                        .from('users')
+                        .select('tokens_used')
+                        .eq('id', serperResult.user_id)
+                        .single();
+
+                    if (!userError && userData) {
+                        const currentTokens = userData.tokens_used || 0;
+                        const newTokens = currentTokens + results.length;
+
+                        await supabaseAdmin
+                            .from('users')
+                            .update({ tokens_used: newTokens })
+                            .eq('id', serperResult.user_id);
+                    }
+                }
             } catch (error) {
                 console.error('Error processing Serper queries:', error);
                 
