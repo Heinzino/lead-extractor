@@ -3,37 +3,11 @@ import { NextRequest, NextResponse } from 'next/server';
 const ENDPOINT = "https://google.serper.dev/places";
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 500;
-const RATE_LIMIT = process.env.NODE_ENV === 'production' ? 200 : 5;
-const RATE_LIMIT_WINDOW = 1100;
-
-let tokens = RATE_LIMIT;
-let lastRefill = Date.now();
-
-async function waitForToken(): Promise<void> {
-    const now = Date.now();
-    const timePassed = now - lastRefill;
-    const newTokens = Math.floor(timePassed / RATE_LIMIT_WINDOW * RATE_LIMIT);
-    
-    if (newTokens > 0) {
-        tokens = Math.min(RATE_LIMIT, tokens + newTokens);
-        lastRefill = now;
-    }
-
-    if (tokens <= 0) {
-        const waitTime = RATE_LIMIT_WINDOW - (now - lastRefill);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-        return waitForToken();
-    }
-
-    tokens--;
-}
 
 async function fetchWithRetry(url: string, options: RequestInit, retries = MAX_RETRIES): Promise<Response> {
     try {
-        await waitForToken();
         const response = await fetch(url, options);
         
-    
         if (response.status >= 500 && retries > 0) {
             const delay = RETRY_DELAY * Math.pow(2, MAX_RETRIES - retries);
             await new Promise(resolve => setTimeout(resolve, delay));
@@ -42,7 +16,6 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = MAX_R
         
         return response;
     } catch (error) {
-    
         if (retries > 0) {
             const delay = RETRY_DELAY * Math.pow(2, MAX_RETRIES - retries);
             await new Promise(resolve => setTimeout(resolve, delay));
