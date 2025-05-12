@@ -165,8 +165,8 @@ async function callFindymail(name: string, domain: string) {
 }
 
 interface EnrichRow {
-  'Company name': string;
-  'Company website': string;
+  'company': string;
+  'website': string;
   'Normalized Domain': string;
   'Desired Job Title': string;
   'Found Person Name': string;
@@ -180,8 +180,8 @@ interface EnrichRow {
 }
 
 async function processRow(row: EnrichRow, jobTitle: string) {
-  const domain = normalizeDomain(row['Company website']);
-  const { user, system } = generatePrompt(row['Company name'], domain, jobTitle);
+  const domain = normalizeDomain(row['website']);
+  const { user, system } = generatePrompt(row['company'], domain, jobTitle);
 
   let content = 'na';
   let cost = 0;
@@ -268,7 +268,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const expandedRows = records.flatMap((row: EnrichRow) => 
       jobTitles.map((jobTitle: string) => ({
         ...row,
-        'Normalized Domain': normalizeDomain(row['Company website']),
+        'Normalized Domain': normalizeDomain(row['website']),
         'Desired Job Title': jobTitle
       }))
     );

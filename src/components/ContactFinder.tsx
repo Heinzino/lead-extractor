@@ -28,6 +28,7 @@ export default function ContactFinder() {
     setIsUploading(true);
     setFile(uploadedFile);
     setIsUploading(false);
+    setHasUploadError(false)
     setToastMessage('File uploaded successfully');
     setToastType('success');
     setShowToast(true);
@@ -46,15 +47,27 @@ export default function ContactFinder() {
 
   const downloadSampleFile = useCallback(() => {
     const link = document.createElement('a');
-    link.href = '/sample-bf-input.csv';
-    link.download = 'sample-bf-input.csv';
+    link.href = '/sample-cf-input.csv';
+    link.download = 'sample-cf-input.csv';
     link.click();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file || !jobTitles || !fileName) {
-      setToastMessage('Please upload a file and enter job titles');
+    if (!file) {
+      setToastMessage('Please upload a file');
+      setToastType('error');
+      setShowToast(true);
+      return;
+    }
+    else if (!jobTitles) {
+      setToastMessage('Please enter the job titles you want to search for');
+      setToastType('error');
+      setShowToast(true);
+      return;
+    }
+    else if (!fileName) {
+      setToastMessage('Please enter a name for your file');
       setToastType('error');
       setShowToast(true);
       return;
@@ -246,7 +259,7 @@ export default function ContactFinder() {
               const event = new Event('submit') as unknown as React.FormEvent;
               handleSubmit(event);
             }}
-            disabled={isEnriching || !file || hasUploadError}
+            disabled={isEnriching || hasUploadError}
             isLoading={isEnriching}
           />
         </div>
