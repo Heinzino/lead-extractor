@@ -103,10 +103,15 @@ export default function BusinessFinder() {
           .from('zip_codes')
           .select('zip')
           .eq('city', city)
-          .eq('state_name', state);
+          .or(`state_id.eq.${state},state_name.eq.${state}`);
 
         if (error) {
           throw new Error(`Error fetching zip codes: ${error.message}`);
+        }
+
+        if (!zipCodes || zipCodes.length === 0) {
+          console.warn(`No zip codes found for city: ${city}, state: ${state}`);
+          continue;
         }
 
         for (const query of queries) {
