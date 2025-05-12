@@ -48,10 +48,22 @@ export async function POST(request: NextRequest) {
 
                 const fileSize = new TextEncoder().encode(csvContent).length;
 
-                const fileName = `serper-results/${resultId}.csv`;
+                // Get the user-provided file name from the database
+                const { data: resultData } = await supabaseAdmin
+                    .from('serper_results')
+                    .select('file_name')
+                    .eq('id', resultId)
+                    .single();
+
+                if (!resultData) {
+                    throw new Error('Could not find result record');
+                }
+
+                // Store with UUID but keep original name in database
+                const storageFileName = `serper-results/${resultId}.csv`;
                 const { error: uploadError } = await supabaseAdmin.storage
                     .from('serper-results')
-                    .upload(fileName, csvContent, {
+                    .upload(storageFileName, csvContent, {
                         contentType: 'text/csv',
                         upsert: true
                     });
@@ -62,7 +74,7 @@ export async function POST(request: NextRequest) {
 
                 const { data: { publicUrl } } = supabaseAdmin.storage
                     .from('serper-results')
-                    .getPublicUrl(fileName);
+                    .getPublicUrl(storageFileName);
 
                 const { error: updateError } = await supabaseAdmin
                     .from('serper_results')
