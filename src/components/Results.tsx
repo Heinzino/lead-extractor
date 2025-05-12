@@ -126,7 +126,7 @@ export default function Results() {
       
       <div className="mb-8">
         <div className="flex items-center mb-2">
-          <h1 className="text-2xl font-bold">Results</h1>
+          <h1 className="text-3xl font-bold">Results</h1>
         </div>
         <p className="text-gray-500">
           View and download your processed results.
