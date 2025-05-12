@@ -164,15 +164,30 @@ export default function Results() {
                       )}
                       <p>Size: {formatFileSize(result.file_size)}</p>
                     </div>
-                    <a
-                      href={result.file_url!}
-                      download={`${result.file_name}.csv`}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      onClick={async () => {
+                        try {
+                          const response = await fetch(result.file_url!);
+                          const blob = await response.blob();
+                          const url = window.URL.createObjectURL(blob);
+                          const link = document.createElement('a');
+                          link.href = url;
+                          link.download = `${result.file_name}.csv`;
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                          window.URL.revokeObjectURL(url);
+                        } catch (error) {
+                          console.error('Error downloading file:', error);
+                          setToastMessage('Error downloading file');
+                          setToastType('error');
+                          setShowToast(true);
+                        }
+                      }}
                       className="p-2 text-gray-500 hover:text-accentBlue hover:cursor-pointer transition-colors rounded-full hover:border"
                     >
                       <Download className="w-5 h-5" />
-                    </a>
+                    </button>
                   </>
                 )}
                 {result.status === 'ERROR' && (

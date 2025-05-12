@@ -49,7 +49,8 @@ async function fetchPlaces(row: SerperQueryRow): Promise<{ places: SerperPlace[]
                     search_term: searchTerm,
                     page: page,
                     is_valid: place.cid ? 'true' : 'false',
-                    maps_url: place.cid ? `https://www.google.com/maps?cid=${place.cid}` : ''
+                    maps_url: place.cid ? `https://www.google.com/maps?cid=${place.cid}` : '',
+                    cid: place.cid ? `'${place.cid}` : undefined
                 };
                 Object.keys(entry).forEach(key => {
                     const value = entry[key];
@@ -94,17 +95,16 @@ export async function runSerper(rows: SerperQueryRow[]): Promise<{ results: Serp
         });
         const chunkResults = await Promise.all(chunkPromises);
         
-        const validResults = chunkResults
+        // Process each place individually to ensure proper deduplication
+        chunkResults
             .flat()
             .filter((entry: SerperPlace | null): entry is SerperPlace => entry !== null)
-            .filter((place: SerperPlace) => place.cid && !seenCids.has(place.cid));
-
-        results.push(...validResults);
-        validResults.forEach((place: SerperPlace) => {
-            if (place.cid) {
-                seenCids.add(place.cid);
-            }
-        });
+            .forEach((place: SerperPlace) => {
+                if (place.cid && !seenCids.has(place.cid)) {
+                    seenCids.add(place.cid);
+                    results.push(place);
+                }
+            });
 
         await new Promise(resolve => setTimeout(resolve, serperConfig.batchDelay));
     }
