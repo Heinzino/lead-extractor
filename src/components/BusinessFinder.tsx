@@ -20,6 +20,7 @@ export default function BusinessFinder() {
   const [toastType, setToastType] = useState<"success" | "error" | "warning">('success');
   const [hasUploadError, setHasUploadError] = useState(false);
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
+  const [fileName, setFileName] = useState('');
 
   const handleFileUpload = useCallback((file: File, type: 'cities' | 'queries' | 'businesses' | 'combined') => {
     if (!file.name.endsWith('.csv')) {
@@ -151,21 +152,16 @@ export default function BusinessFinder() {
     }
   }, [citiesFile, queriesFile]);
 
-  const generateFileName = (rows: { query: string }[]) => {
-    const queries = [...new Set(rows.slice(0, 10).map(row => row.query))];
-    const cleanQueries = queries.map(q => 
-      q.toLowerCase()
-        .replace(/\s+in\s+/g, '')
-        .replace(/[^a-z0-9]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '')
-    );
-    return cleanQueries.join('-');
-  };
-
   const handleSerperQueries = useCallback(async () => {
     if (!combinedFile) {
       setToastMessage('Please upload the combined CSV file');
+      setToastType('error');
+      setShowToast(true);
+      return;
+    }
+
+    if (!fileName) {
+      setToastMessage('Please enter a name for your file');
       setToastType('error');
       setShowToast(true);
       return;
@@ -191,7 +187,6 @@ export default function BusinessFinder() {
         throw new Error('User not authenticated');
       }
 
-      const fileName = generateFileName(rows);
       const { data: result, error: createError } = await supabase
         .from('serper_results')
         .insert({
@@ -246,7 +241,7 @@ export default function BusinessFinder() {
     } finally {
       setIsRunningSerper(false);
     }
-  }, [combinedFile]);
+  }, [combinedFile, fileName]);
 
   const closeToast = useCallback(() => {
     setShowToast(false);
@@ -466,6 +461,24 @@ export default function BusinessFinder() {
               </div>
             </div>
           )}
+        </div>
+        <div className="space-y-6">
+          <div>
+            <label 
+              htmlFor="file-name" 
+              className="block text-sm text-gray-500 mb-2"
+            >
+              What do you want to name your file?
+            </label>
+            <input
+              id="file-name"
+              type="text"
+              placeholder="my-business-list"
+              value={fileName}
+              onChange={(e) => setFileName(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+            />
+          </div>
         </div>
         <div className="w-full flex flex-col items-center mt-16">
           <Button
