@@ -1,6 +1,7 @@
 import { useAuth } from '../context/AuthContext';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase/supabaseClient';
+import TokenPurchaseSlider from './TokenPurchaseSlider';
 
 interface UserProfile {
   first_name: string | null;
@@ -64,6 +65,7 @@ export default function Settings() {
         {/* Purchase Tokens Section */}
         <div className="bg-white shadow-md rounded-2xl p-6">
           <h3 className="text-xl font-semibold text-gray-800">Purchase Tokens</h3>
+          <TokenPurchaseSlider/>
         </div>
       </div>
     </div>
