@@ -289,7 +289,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     );
 
     const output = stringify(enrichedResults, { header: true });
-    const fileSize = new TextEncoder().encode(output).length;
     const fileName = `enrich-results/${resultId}.csv`;
 
     const { data: buckets } = await supabaseAdmin.storage.listBuckets();
@@ -332,13 +331,36 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       throw new Error('Failed to generate signed URL');
     }
 
+    const { data: enrichResult, error: fetchUserError } = await supabaseAdmin
+      .from('enrich_results')
+      .select('user_id')
+      .eq('id', resultId)
+      .single();
+
+    if (!fetchUserError && enrichResult?.user_id) {
+      const { data: userData, error: userError } = await supabaseAdmin
+        .from('users')
+        .select('tokens_used')
+        .eq('id', enrichResult.user_id)
+        .single();
+
+      if (!userError && userData) {
+        const currentTokens = userData.tokens_used || 0;
+        const newTokens = currentTokens + enrichedResults.length;
+
+        await supabaseAdmin
+          .from('users')
+          .update({ tokens_used: newTokens })
+          .eq('id', enrichResult.user_id);
+      }
+    }
+
     const { error: updateError } = await supabaseAdmin
       .from('enrich_results')
       .update({
         status: 'DONE',
         file_url: data.signedUrl,
         result_count: enrichedResults.length,
-        file_size: fileSize,
         updated_at: new Date().toISOString()
       })
       .eq('id', resultId);
