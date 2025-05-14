@@ -42,7 +42,6 @@ export default function Settings() {
   }, [fetchProfile]);
 
   const handlePurchaseSuccess = useCallback(async () => {
-    // Wait for 2 seconds to ensure webhook has processed
     await new Promise(resolve => setTimeout(resolve, 2000));
     await fetchProfile();
   }, [fetchProfile]);

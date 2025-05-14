@@ -18,19 +18,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: 'Amount and token count are required' });
     }
 
-    // Get the session from the request headers
     const authHeader = req.headers.authorization;
     if (!authHeader) {
       return res.status(401).json({ error: 'No authorization header' });
     }
 
-    // Extract the access token
     const accessToken = authHeader.replace('Bearer ', '');
     if (!accessToken) {
       return res.status(401).json({ error: 'Invalid authorization header' });
     }
 
-    // Get the user using the access token
     const { data: { user }, error: userError } = await supabase.auth.getUser(accessToken);
     
     if (userError || !user) {
@@ -38,9 +35,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(401).json({ error: 'Invalid session' });
     }
 
-    // Create a PaymentIntent with the order amount and currency
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(amount * 100), // Convert to cents
+      amount: Math.round(amount * 100),
       currency: 'usd',
       automatic_payment_methods: {
         enabled: true,

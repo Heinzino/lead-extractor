@@ -16,7 +16,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const event = req.body as Stripe.Event;
 
-    // Only handle payment_intent.succeeded events
     if (event.type === 'payment_intent.succeeded') {
       const paymentIntent = event.data.object as Stripe.PaymentIntent;
       const userId = paymentIntent.metadata.userId;
@@ -26,7 +25,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         throw new Error('Missing userId or tokenCount in payment metadata');
       }
 
-      // First get current token balance
       const { data: userData, error: fetchError } = await supabase
         .from('users')
         .select('user_tokens')
@@ -37,11 +35,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         throw fetchError;
       }
 
-      // Calculate new balance
       const currentTokens = userData.user_tokens || 0;
       const newTokens = currentTokens + tokenCount;
 
-      // Update user's token balance
       const { error: updateError } = await supabase
         .from('users')
         .update({ user_tokens: newTokens })
@@ -55,7 +51,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json({ received: true });
     }
 
-    // For other events, just acknowledge receipt
     return res.status(200).json({ received: true });
   } catch (error) {
     console.error('Error processing webhook:', error);

@@ -36,7 +36,6 @@ const TokenPurchaseSlider: React.FC<TokenPurchaseSliderProps> = ({ onPurchaseSuc
 
   const handlePurchase = async () => {
     try {
-      // Get a fresh session
       const { data: { session: initialSession }, error: sessionError } = await supabase.auth.getSession();
       if (sessionError) {
         throw new Error('Failed to get session');
@@ -45,7 +44,6 @@ const TokenPurchaseSlider: React.FC<TokenPurchaseSliderProps> = ({ onPurchaseSuc
         throw new Error('No active session. Please log in to continue.');
       }
 
-      // Refresh the session if needed
       let session = initialSession;
       if (session.expires_at && session.expires_at * 1000 < Date.now()) {
         const { data: { session: newSession }, error: refreshError } = await supabase.auth.refreshSession();
@@ -55,7 +53,6 @@ const TokenPurchaseSlider: React.FC<TokenPurchaseSliderProps> = ({ onPurchaseSuc
         session = newSession;
       }
 
-      // Create payment intent
       const response = await fetch('/api/stripe/create-payment', {
         method: 'POST',
         headers: {

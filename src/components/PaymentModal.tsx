@@ -58,7 +58,7 @@ const PaymentForm: React.FC<{
       <div className="mt-8 flex justify-center">
         <Button
           text="Purchase Tokens"
-          onClick={() => {}} // Required by Button component
+          onClick={() => {}}
           isLoading={isProcessing}
         />
       </div>
