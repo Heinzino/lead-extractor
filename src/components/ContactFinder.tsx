@@ -14,7 +14,7 @@ export default function ContactFinder() {
   const [fileName, setFileName] = useState('');
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
-  const [toastType, setToastType] = useState<"success" | "error" | "warning">('success');
+  const [toastType, setToastType] = useState<'error' | 'success'>('success');
   const [hasUploadError, setHasUploadError] = useState(false);
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
 

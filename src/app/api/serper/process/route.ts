@@ -48,7 +48,6 @@ export async function POST(request: NextRequest) {
 
                 const fileSize = new TextEncoder().encode(csvContent).length;
 
-                // Get the user-provided file name from the database
                 const { data: resultData } = await supabaseAdmin
                     .from('serper_results')
                     .select('file_name')
@@ -59,7 +58,6 @@ export async function POST(request: NextRequest) {
                     throw new Error('Could not find result record');
                 }
 
-                // Store with UUID but keep original name in database
                 const storageFileName = `serper-results/${resultId}.csv`;
                 const { error: uploadError } = await supabaseAdmin.storage
                     .from('serper-results')

@@ -37,7 +37,7 @@ export default function Results() {
   const [results, setResults] = useState<Result[]>([]);
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
-  const [toastType, setToastType] = useState<'success' | 'error' | 'warning'>('success');
+  const [toastType, setToastType] = useState<'error' | 'success'>('success');
   const searchParams = useSearchParams();
 
   useEffect(() => {

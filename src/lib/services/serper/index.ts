@@ -80,7 +80,6 @@ export async function runSerper(rows: SerperQueryRow[]): Promise<{ results: Serp
     const seenCids = new Set<string>();
     let totalCreditsUsed = 0;
     
-    // Limit rows in development mode
     if (process.env.NODE_ENV !== 'production') {
         rows = rows.slice(0, 10);
     }
@@ -95,7 +94,6 @@ export async function runSerper(rows: SerperQueryRow[]): Promise<{ results: Serp
         });
         const chunkResults = await Promise.all(chunkPromises);
         
-        // Process each place individually to ensure proper deduplication
         chunkResults
             .flat()
             .filter((entry: SerperPlace | null): entry is SerperPlace => entry !== null)
