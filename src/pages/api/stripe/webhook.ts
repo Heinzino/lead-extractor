@@ -1,10 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import Stripe from 'stripe';
 import { supabase } from '../../../lib/supabase/supabaseClient';
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-04-30.basil',
-});
+import Stripe from 'stripe';
 
 export const config = {
   api: {

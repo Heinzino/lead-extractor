@@ -18,14 +18,13 @@ export default function LoginPage() {
   const [successMsg, setSuccessMsg] = useState('');
 
   useEffect(() => {
-    
     const { success } = router.query;
     if (success === 'registered') {
       setSuccessMsg('Account created successfully! Please check your email for the confirmation link.');
       
       router.replace('/login', undefined, { shallow: true });
     }
-  }, [router.query]);
+  }, [router, router.query]);
 
   const validatePassword = (password: string) => {
     const requirements = {
@@ -156,8 +155,8 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white">
-      {errorMsg && <Toast message={errorMsg} type="error" />}
-      {successMsg && <Toast message={successMsg} type="success" />}
+      {errorMsg && <Toast message={errorMsg} type="error" onClose={() => setErrorMsg('')} />}
+      {successMsg && <Toast message={successMsg} type="success" onClose={() => setSuccessMsg('')} />}
       <div className="w-full max-w-sm bg-white/5 backdrop-blur-md p-8 rounded-2xl shadow-lg border border-white/10">
         <h1 className="text-3xl font-semibold text-center mb-6">
           {isLogin ? 'Welcome Back' : 'Create Account'}
