@@ -1,5 +1,5 @@
 import { useAuth } from '../context/AuthContext';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase/supabaseClient';
 import TokenPurchaseSlider from './TokenPurchaseSlider';
 
@@ -13,11 +13,13 @@ interface UserProfile {
 export default function Settings() {
   const { user } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  useEffect(() => {
-    const fetchProfile = async () => {
-      if (!user) return;
-      
+  const fetchProfile = useCallback(async () => {
+    if (!user) return;
+    
+    setIsRefreshing(true);
+    try {
       const { data, error } = await supabase
         .from('users')
         .select('first_name, last_name, tokens_used, user_tokens')
@@ -30,10 +32,20 @@ export default function Settings() {
       }
 
       setProfile(data);
-    };
-
-    fetchProfile();
+    } finally {
+      setIsRefreshing(false);
+    }
   }, [user]);
+
+  useEffect(() => {
+    fetchProfile();
+  }, [fetchProfile]);
+
+  const handlePurchaseSuccess = useCallback(async () => {
+    // Wait for 2 seconds to ensure webhook has processed
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    await fetchProfile();
+  }, [fetchProfile]);
 
   return (
     <div className="w-full mx-auto p-4 md:px-6 md:pt-4 md:pb-24">
@@ -62,7 +74,13 @@ export default function Settings() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-600">Available Tokens</label>
-              <div className="mt-1 text-gray-900">{profile?.user_tokens ?? '—'}</div>
+              <div className="mt-1 text-gray-900">
+                {isRefreshing ? (
+                  <span className="inline-block animate-pulse">Refreshing...</span>
+                ) : (
+                  profile?.user_tokens ?? '—'
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -70,7 +88,7 @@ export default function Settings() {
         {/* Purchase Tokens Section */}
         <div className="bg-white shadow-md rounded-2xl p-6">
           <h3 className="text-xl font-semibold text-gray-800">Purchase Tokens</h3>
-          <TokenPurchaseSlider/>
+          <TokenPurchaseSlider onPurchaseSuccess={handlePurchaseSuccess} />
         </div>
       </div>
     </div>

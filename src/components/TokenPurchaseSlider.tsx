@@ -1,66 +1,18 @@
-import React, { useState, useEffect, FormEvent } from 'react';
+import React, { useState, useEffect } from 'react';
 import Button from './Button';
 import Toast from './Toast';
 import { getStripe } from '../lib/stripe';
 import { supabase } from '../lib/supabase/supabaseClient';
-import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { Stripe } from '@stripe/stripe-js';
+import PaymentModal from './PaymentModal';
 
 const TOKENS_PER_DOLLAR = 1000;
 
-interface PaymentFormProps {
-  onSuccess: () => void;
-  onError: (error: string) => void;
+interface TokenPurchaseSliderProps {
+  onPurchaseSuccess?: () => void;
 }
 
-const PaymentForm: React.FC<PaymentFormProps> = ({ onSuccess, onError }) => {
-  const stripe = useStripe();
-  const elements = useElements();
-  const [isProcessing, setIsProcessing] = useState(false);
-
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    
-    if (!stripe || !elements) {
-      return;
-    }
-
-    setIsProcessing(true);
-
-    try {
-      const { error } = await stripe.confirmPayment({
-        elements,
-        confirmParams: {
-          return_url: `${window.location.origin}/settings`,
-        },
-        redirect: 'if_required',
-      });
-
-      if (error) {
-        onError(error.message || 'Payment failed');
-      } else {
-        onSuccess();
-      }
-    } catch (error) {
-      onError(error instanceof Error ? error.message : 'An unexpected error occurred');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="mt-4">
-      <PaymentElement />
-      <Button
-        text="Purchase Tokens"
-        onClick={() => {}} // Required by Button component
-        isLoading={isProcessing}
-      />
-    </form>
-  );
-};
-
-const TokenPurchaseSlider = () => {
+const TokenPurchaseSlider: React.FC<TokenPurchaseSliderProps> = ({ onPurchaseSuccess }) => {
   const [tokenCount, setTokenCount] = useState(500);
   const [cost, setCost] = useState(0);
   const [showToast, setShowToast] = useState(false);
@@ -68,6 +20,7 @@ const TokenPurchaseSlider = () => {
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
   const [clientSecret, setClientSecret] = useState('');
   const [stripePromise, setStripePromise] = useState<Stripe | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   
   useEffect(() => {
     setCost(tokenCount / TOKENS_PER_DOLLAR);
@@ -126,6 +79,7 @@ const TokenPurchaseSlider = () => {
       }
 
       setClientSecret(data.clientSecret);
+      setIsModalOpen(true);
     } catch (error) {
       console.error('Payment error:', error);
       setToastMessage(error instanceof Error ? error.message : 'Payment failed. Please try again.');
@@ -139,12 +93,15 @@ const TokenPurchaseSlider = () => {
     setToastType('success');
     setShowToast(true);
     setClientSecret('');
+    setIsModalOpen(false);
+    onPurchaseSuccess?.();
   };
 
   const handleError = (error: string) => {
     setToastMessage(error || 'Payment failed. Please try again.');
     setToastType('error');
     setShowToast(true);
+    setIsModalOpen(false);
   };
   
   return (
@@ -187,24 +144,22 @@ const TokenPurchaseSlider = () => {
           <p className="text-xs text-gray-500">Rate: {TOKENS_PER_DOLLAR} tokens per $1.00</p>
         </div>
         
-        {!clientSecret ? (
-          <Button
-            text="Continue to Payment"
-            onClick={handlePurchase}
-          />
-        ) : (
-          <div className="w-full">
-            {stripePromise && (
-              <Elements stripe={stripePromise} options={{ clientSecret }}>
-                <PaymentForm
-                  onSuccess={handleSuccess}
-                  onError={handleError}
-                />
-              </Elements>
-            )}
-          </div>
-        )}
+        <Button
+          text="Purchase Tokens"
+          onClick={handlePurchase}
+        />
       </div>
+
+      <PaymentModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        clientSecret={clientSecret}
+        stripePromise={stripePromise}
+        tokenCount={tokenCount}
+        cost={cost}
+        onSuccess={handleSuccess}
+        onError={handleError}
+      />
     </div>
   );
 };
