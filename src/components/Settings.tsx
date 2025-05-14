@@ -7,6 +7,7 @@ interface UserProfile {
   first_name: string | null;
   last_name: string | null;
   tokens_used: number | null;
+  user_tokens: number | null;
 }
 
 export default function Settings() {
@@ -19,7 +20,7 @@ export default function Settings() {
       
       const { data, error } = await supabase
         .from('users')
-        .select('first_name, last_name, tokens_used')
+        .select('first_name, last_name, tokens_used, user_tokens')
         .eq('id', user.id)
         .single();
 
@@ -58,6 +59,10 @@ export default function Settings() {
             <div>
               <label className="block text-sm font-medium text-gray-600">Tokens Used</label>
               <div className="mt-1 text-gray-900">{profile?.tokens_used ?? '—'}</div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-600">Available Tokens</label>
+              <div className="mt-1 text-gray-900">{profile?.user_tokens ?? '—'}</div>
             </div>
           </div>
         </div>

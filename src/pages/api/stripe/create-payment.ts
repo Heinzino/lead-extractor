@@ -1,0 +1,61 @@
+import { NextApiRequest, NextApiResponse } from 'next';
+import Stripe from 'stripe';
+import { supabase } from '../../../lib/supabase/supabaseClient';
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: '2025-04-30.basil',
+});
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const { amount, tokenCount } = req.body;
+
+    if (!amount || !tokenCount) {
+      return res.status(400).json({ error: 'Amount and token count are required' });
+    }
+
+    // Get the session from the request headers
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'No authorization header' });
+    }
+
+    // Extract the access token
+    const accessToken = authHeader.replace('Bearer ', '');
+    if (!accessToken) {
+      return res.status(401).json({ error: 'Invalid authorization header' });
+    }
+
+    // Get the user using the access token
+    const { data: { user }, error: userError } = await supabase.auth.getUser(accessToken);
+    
+    if (userError || !user) {
+      console.error('Auth error:', userError);
+      return res.status(401).json({ error: 'Invalid session' });
+    }
+
+    // Create a PaymentIntent with the order amount and currency
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(amount * 100), // Convert to cents
+      currency: 'usd',
+      automatic_payment_methods: {
+        enabled: true,
+      },
+      metadata: {
+        userId: user.id,
+        tokenCount: tokenCount.toString(),
+      },
+    });
+
+    return res.status(200).json({
+      clientSecret: paymentIntent.client_secret,
+    });
+  } catch (error) {
+    console.error('Error creating payment:', error);
+    return res.status(500).json({ error: 'Error creating payment' });
+  }
+} 
