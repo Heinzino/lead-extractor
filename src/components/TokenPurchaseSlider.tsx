@@ -5,6 +5,7 @@ import { getStripe } from '../lib/stripe';
 import { supabase } from '../lib/supabase/supabaseClient';
 import { Stripe } from '@stripe/stripe-js';
 import PaymentModal from './PaymentModal';
+import { useRouter } from 'next/router';
 
 const TOKENS_PER_DOLLAR = 1000;
 
@@ -13,6 +14,7 @@ interface TokenPurchaseSliderProps {
 }
 
 const TokenPurchaseSlider: React.FC<TokenPurchaseSliderProps> = ({ onPurchaseSuccess }) => {
+  const router = useRouter();
   const [tokenCount, setTokenCount] = useState(500);
   const [cost, setCost] = useState(0);
   const [showToast, setShowToast] = useState(false);
@@ -21,6 +23,7 @@ const TokenPurchaseSlider: React.FC<TokenPurchaseSliderProps> = ({ onPurchaseSuc
   const [clientSecret, setClientSecret] = useState('');
   const [stripePromise, setStripePromise] = useState<Stripe | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [hasShownRedirectToast, setHasShownRedirectToast] = useState(false);
   
   useEffect(() => {
     setCost(tokenCount / TOKENS_PER_DOLLAR);
@@ -33,6 +36,18 @@ const TokenPurchaseSlider: React.FC<TokenPurchaseSliderProps> = ({ onPurchaseSuc
     };
     initializeStripe();
   }, []);
+
+  useEffect(() => {
+    if (!hasShownRedirectToast && router && router.query) {
+      const { payment_intent, redirect_status } = router.query;
+      if (payment_intent && redirect_status === 'succeeded') {
+        setToastMessage('Payment successful! Your tokens have been added to your account.');
+        setToastType('success');
+        setShowToast(true);
+        setHasShownRedirectToast(true);
+      }
+    }
+  }, [router, hasShownRedirectToast]);
 
   const handlePurchase = async () => {
     try {

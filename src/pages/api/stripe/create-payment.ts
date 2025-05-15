@@ -38,9 +38,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(amount * 100),
       currency: 'usd',
-      automatic_payment_methods: {
-        enabled: true,
-      },
+      payment_method_types: ['card'],
       metadata: {
         userId: user.id,
         tokenCount: tokenCount.toString(),
