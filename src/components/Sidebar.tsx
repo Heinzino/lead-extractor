@@ -15,13 +15,11 @@ export default function Sidebar({ activePage, setActivePage }: { activePage: str
 
   const handleNavigation = (page: string) => {
     setActivePage(page);
-    // Auto-close sidebar on mobile
     if (window.innerWidth < 768) setIsSidebarOpen(false);
   };
 
   return (
     <>
-      {/* Hamburger button for mobile */}
       <button
         className="md:hidden fixed top-4 left-4 z-50 bg-darkBlue p-2 rounded-lg shadow-lg"
         onClick={() => setIsSidebarOpen(true)}
@@ -30,7 +28,6 @@ export default function Sidebar({ activePage, setActivePage }: { activePage: str
         <Menu size={28} className="text-white" />
       </button>
 
-      {/* Overlay for mobile when sidebar is open */}
       {isSidebarOpen && (
         <div
           className="fixed inset-0 bg-black bg-opacity-40 z-40 md:hidden"
@@ -38,7 +35,6 @@ export default function Sidebar({ activePage, setActivePage }: { activePage: str
         />
       )}
 
-      {/* Sidebar */}
       <div
         className={`
           fixed top-0 left-0 h-full z-50
@@ -55,7 +51,6 @@ export default function Sidebar({ activePage, setActivePage }: { activePage: str
               <img src="/Risorsa_7c.svg" alt="Logo" className="w-8 h-8" />
               <h1 className="text-2xl font-bold">Lead Extractor</h1>
             </div>
-            {/* Close button for mobile */}
             <button
               onClick={toggleSidebar}
               className="text-white focus:outline-none hover:cursor-pointer md:hidden"
