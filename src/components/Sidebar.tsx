@@ -8,15 +8,13 @@ const sidebarItems = [
   { title: 'Settings', icon: <Settings size={24} /> },
 ];
 
-export default function Sidebar({ setActivePage }: { setActivePage: (page: string) => void }) {
+export default function Sidebar({ activePage, setActivePage }: { activePage: string, setActivePage: (page: string) => void }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true); // Start with sidebar open
-  const [activePage, setActivePageState] = useState<string>('Results');
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
   const handleNavigation = (page: string) => {
-    setActivePageState(page);
-    setActivePage(page); // Pass the page to the parent component (Home)
+    setActivePage(page);
   };
 
   return (

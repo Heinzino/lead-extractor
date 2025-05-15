@@ -1,13 +1,24 @@
 "use client";
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Results from '../components/Results';
 import BusinessFinder from '../components/BusinessFinder';
 import ContactFinder from '../components/ContactFinder';
 import Settings from '../components/Settings';
 import Sidebar from '../components/Sidebar';
+import { useRouter } from 'next/router';
 
 export default function Home() {
   const [activePage, setActivePage] = useState<string>('Results');
+  const router = useRouter();
+
+  useEffect(() => {
+    if (router && router.query) {
+      const { payment_intent, redirect_status } = router.query;
+      if (payment_intent && redirect_status === 'succeeded') {
+        setActivePage('Settings');
+      }
+    }
+  }, [router]);
 
   const renderActivePage = () => {
     switch (activePage) {
@@ -26,7 +37,7 @@ export default function Home() {
 
   return (
     <div className="flex h-screen">
-      <Sidebar setActivePage={setActivePage} />
+      <Sidebar activePage={activePage} setActivePage={setActivePage} />
       <div className="flex-1 p-8 bg-white overflow-y-auto">
         {renderActivePage()}
       </div>
