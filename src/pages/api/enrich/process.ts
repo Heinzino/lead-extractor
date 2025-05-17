@@ -44,11 +44,23 @@ function normalizeDomain(url: string): string {
 }
 
 function cleanName(name: string): string {
-  return name
+  // Remove bracketed content and trailing punctuation
+  let cleaned = name
     .replace(/\[\d+\]/g, '')
     .replace(/\[.*?\]/g, '')
     .trim()
     .replace(/[.,]+$/, '');
+
+  const prefixes = /\b(Dr\.|Mr\.|Mrs\.|Ms\.|Miss|Prof\.|Professor)\b/gi;
+  cleaned = cleaned.replace(prefixes, '');
+
+  const suffixes = /\b(PhD|MBA|MD|Jr\.|Sr\.||Esq\.)\b/gi;
+  cleaned = cleaned.replace(suffixes, '');
+
+  cleaned = cleaned.replace(/\b[A-Z]\.\s*/g, '');
+
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  return cleaned;
 }
 
 function cleanEmail(email: string): string {
