@@ -99,18 +99,18 @@ export async function POST(request: NextRequest) {
                 if (!fetchUserError && serperResult?.user_id) {
                     const { data: userData, error: userError } = await supabaseAdmin
                         .from('users')
-                        .select('tokens_used')
-                        .eq('id', serperResult.user_id)
+                        .select('user_tokens')
+                        .eq('id', serperResult.user_id as string)
                         .single();
 
                     if (!userError && userData) {
-                        const currentTokens = userData.tokens_used || 0;
-                        const newTokens = currentTokens + results.length;
+                        const currentTokens = userData.user_tokens || 0;
+                        const newTokens = currentTokens - rows.length;
 
                         await supabaseAdmin
                             .from('users')
-                            .update({ tokens_used: newTokens })
-                            .eq('id', serperResult.user_id);
+                            .update({ user_tokens: newTokens })
+                            .eq('id', serperResult.user_id as string);
                     }
                 }
             } catch (error) {

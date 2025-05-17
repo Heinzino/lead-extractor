@@ -352,17 +352,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!fetchUserError && enrichResult?.user_id) {
       const { data: userData, error: userError } = await supabaseAdmin
         .from('users')
-        .select('tokens_used')
+        .select('user_tokens')
         .eq('id', enrichResult.user_id)
         .single();
 
       if (!userError && userData) {
-        const currentTokens = userData.tokens_used || 0;
-        const newTokens = currentTokens + enrichedResults.length;
+        const currentTokens = userData.user_tokens || 0;
+        const newTokens = currentTokens - enrichedResults.length;
 
         await supabaseAdmin
           .from('users')
-          .update({ tokens_used: newTokens })
+          .update({ user_tokens: newTokens })
           .eq('id', enrichResult.user_id);
       }
     }

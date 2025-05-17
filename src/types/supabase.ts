@@ -93,19 +93,25 @@ export type Database = {
       users: {
         Row: {
           id: string
-          tokens_used: number
+          user_tokens: number
+          first_name: string | null
+          last_name: string | null
           created_at: string
           updated_at: string
         }
         Insert: {
           id: string
-          tokens_used?: number
+          user_tokens?: number
+          first_name?: string | null
+          last_name?: string | null
           created_at?: string
           updated_at?: string
         }
         Update: {
           id?: string
-          tokens_used?: number
+          user_tokens?: number
+          first_name?: string | null
+          last_name?: string | null
           created_at?: string
           updated_at?: string
         }
