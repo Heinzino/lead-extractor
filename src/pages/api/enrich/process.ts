@@ -346,7 +346,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const { data: enrichResult, error: fetchUserError } = await supabaseAdmin
       .from('enrich_results')
       .select('user_id')
-      .eq('id', resultId)
+      .eq('id', resultId as string)
       .single();
 
     if (!fetchUserError && enrichResult?.user_id) {
@@ -375,7 +375,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         result_count: enrichedResults.length,
         updated_at: new Date().toISOString()
       })
-      .eq('id', resultId);
+      .eq('id', resultId as string);
 
     if (updateError) {
       throw new Error(`Error updating record: ${updateError.message}`);

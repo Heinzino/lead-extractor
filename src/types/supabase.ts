@@ -27,50 +27,92 @@ export type Database = {
         }
         Relationships: []
       }
-      zip_codes: {
+      serper_results: {
         Row: {
-          zip: string
-          lat: string
-          lng: string
-          city: string
-          state_id: string
-          state_name: string
-          county_name: string
+          id: string
+          user_id: string
+          file_name: string
+          status: string
+          error_message?: string
+          created_at: string
+          updated_at: string
         }
         Insert: {
-          zip: string
-          lat: string
-          lng: string
-          city: string
-          state_id: string
-          state_name: string
-          county_name: string
+          id?: string
+          user_id: string
+          file_name: string
+          status: string
+          error_message?: string
+          created_at?: string
+          updated_at?: string
         }
         Update: {
-          zip?: string
-          lat?: string
-          lng?: string
-          city?: string
-          state_id?: string
-          state_name?: string
-          county_name?: string
+          id?: string
+          user_id?: string
+          file_name?: string
+          status?: string
+          error_message?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      enrich_results: {
+        Row: {
+          id: string
+          user_id: string
+          status: string
+          error_message?: string
+          file_url?: string
+          result_count?: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          status: string
+          error_message?: string
+          file_url?: string
+          result_count?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          status?: string
+          error_message?: string
+          file_url?: string
+          result_count?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      users: {
+        Row: {
+          id: string
+          tokens_used: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id: string
+          tokens_used?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          tokens_used?: number
+          created_at?: string
+          updated_at?: string
         }
         Relationships: []
       }
     }
-    Views: {
-      zip_codes_view: {
-        Row: {
-          zip: string
-          lat: number
-          lng: number
-          city: string
-          state_id: string
-          state_name: string
-          county_name: string
-        }
-      }
-    }
+    Views: Record<never, never>
     Functions: {
       [_ in never]: never
     }
