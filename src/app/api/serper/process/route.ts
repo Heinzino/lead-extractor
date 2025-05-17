@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
                 const { data: resultData } = await supabaseAdmin
                     .from('serper_results')
                     .select('file_name')
-                    .eq('id', resultId)
+                    .eq('id', resultId as string)
                     .single();
 
                 if (!resultData) {
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
                         credits_used: creditsUsed,
                         updated_at: new Date().toISOString()
                     })
-                    .eq('id', resultId);
+                    .eq('id', resultId as string);
 
                 if (updateError) {
                     throw new Error(`Error updating record: ${updateError.message}`);
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
                 const { data: serperResult, error: fetchUserError } = await supabaseAdmin
                     .from('serper_results')
                     .select('user_id')
-                    .eq('id', resultId)
+                    .eq('id', resultId as string)
                     .single();
 
                 if (!fetchUserError && serperResult?.user_id) {
@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
 
                     if (!userError && userData) {
                         const currentTokens = userData.user_tokens || 0;
-                        const newTokens = currentTokens - rows.length;
+                        const newTokens = currentTokens - results.length;
 
                         await supabaseAdmin
                             .from('users')
