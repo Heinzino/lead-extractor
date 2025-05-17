@@ -43,49 +43,51 @@ export default function FileUploaderBox({
 
         const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
         
-        switch(type) {
-          case 'cities':
-            if (!headers.includes('city') || !headers.includes('state')) {
-              return {
-                isValid: false,
-                message: 'File must contain "city" and "state" columns'
-              };
-            }
-            break;
-          case 'queries':
-            if (!headers.includes('query')) {
-              return {
-                isValid: false,
-                message: 'File must contain a "query" column'
-              };
-            }
-            break;
-          case 'combined':
-            if (!headers.includes('query') || !headers.includes('city') || 
-                !headers.includes('state') || !headers.includes('zip')) {
-              return {
-                isValid: false,
-                message: 'File must contain "query", "city", "state", and "zip" columns'
-              };
-            }
-            break;
-          case 'businesses':
-            if (!headers.includes('company') || !headers.includes('website')) {
-              return {
-                isValid: false,
-                message: 'File must contain "company" and "website" columns'
-              };
-            }
-            break;
-        }
+        const hasMeaningfulContent = (value: string): boolean => {
+          const lettersOnly = value.replace(/[^a-zA-Z]/g, '');
+          return lettersOnly.length > 0;
+        };
 
         for (let i = 1; i < lines.length; i++) {
           const values = lines[i].split(',').map(v => v.trim());
-          if (values.some(v => !v)) {
-            return {
-              isValid: false,
-              message: `Row ${i} contains empty values`
-            };
+          const rowData = Object.fromEntries(headers.map((h, idx) => [h, values[idx]]));
+          
+          switch(type) {
+            case 'cities':
+              if (!hasMeaningfulContent(rowData.city || '') || !hasMeaningfulContent(rowData.state || '')) {
+                return {
+                  isValid: false,
+                  message: `Row ${i} is missing meaningful "city" or "state" values`
+                };
+              }
+              break;
+            case 'queries':
+              if (!hasMeaningfulContent(rowData.query || '')) {
+                return {
+                  isValid: false,
+                  message: `Row ${i} is missing meaningful "query" value`
+                };
+              }
+              break;
+            case 'combined':
+              if (!hasMeaningfulContent(rowData.query || '') || 
+                  !hasMeaningfulContent(rowData.city || '') || 
+                  !hasMeaningfulContent(rowData.state || '') || 
+                  !rowData.zip) {
+                return {
+                  isValid: false,
+                  message: `Row ${i} is missing meaningful "query", "city", "state", or "zip" values`
+                };
+              }
+              break;
+            case 'businesses':
+              if (!hasMeaningfulContent(rowData.company || '') || !rowData.website) {
+                return {
+                  isValid: false,
+                  message: `Row ${i} is missing meaningful "company" or "website" values`
+                };
+              }
+              break;
           }
         }
 

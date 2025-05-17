@@ -9,11 +9,11 @@ interface SerperResult {
   user_id: string;
   file_name: string;
   status: 'RUNNING' | 'DONE' | 'ERROR';
-  result_count: number | null;
-  credits_used: number | null;
-  file_size: number | null;
-  file_url: string | null;
-  error_message: string | null;
+  result_count?: number;
+  credits_used?: number;
+  file_size?: number;
+  file_url?: string;
+  error_message?: string;
   created_at: string;
   updated_at: string;
 }
@@ -23,15 +23,15 @@ interface EnrichResult {
   user_id: string;
   file_name: string;
   status: 'RUNNING' | 'DONE' | 'ERROR';
-  result_count: number | null;
-  file_size: number | null;
-  file_url: string | null;
-  error_message: string | null;
+  result_count?: number;
+  file_size?: number;
+  file_url?: string;
+  error_message?: string;
   created_at: string;
   updated_at: string;
 }
 
-type Result = (SerperResult | EnrichResult) & { type: 'serper' | 'enrich' };
+type Result = (SerperResult & { type: 'serper' }) | (EnrichResult & { type: 'enrich' });
 
 export default function Results() {
   const [results, setResults] = useState<Result[]>([]);
@@ -84,8 +84,31 @@ export default function Results() {
     }
 
     const combinedResults: Result[] = [
-      ...(serperResults.data || []).map(r => ({ ...r, type: 'serper' as const })),
-      ...(enrichResults.data || []).map(r => ({ ...r, type: 'enrich' as const }))
+      ...(serperResults.data || []).map(r => {
+        const result = r as unknown as SerperResult;
+        return {
+          ...result,
+          type: 'serper' as const,
+          status: result.status as 'RUNNING' | 'DONE' | 'ERROR',
+          result_count: result.result_count ?? undefined,
+          credits_used: result.credits_used ?? undefined,
+          file_size: result.file_size ?? undefined,
+          file_url: result.file_url ?? undefined,
+          error_message: result.error_message ?? undefined
+        };
+      }),
+      ...(enrichResults.data || []).map(r => {
+        const result = r as unknown as EnrichResult;
+        return {
+          ...result,
+          type: 'enrich' as const,
+          status: result.status as 'RUNNING' | 'DONE' | 'ERROR',
+          result_count: result.result_count ?? undefined,
+          file_size: result.file_size ?? undefined,
+          file_url: result.file_url ?? undefined,
+          error_message: result.error_message ?? undefined
+        };
+      })
     ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
     setResults(combinedResults);
@@ -102,7 +125,7 @@ export default function Results() {
     }
   };
 
-  const formatFileSize = (bytes: number | null) => {
+  const formatFileSize = (bytes: number | undefined | null) => {
     if (!bytes) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];

@@ -44,11 +44,23 @@ function normalizeDomain(url: string): string {
 }
 
 function cleanName(name: string): string {
-  return name
+  // Remove bracketed content and trailing punctuation
+  let cleaned = name
     .replace(/\[\d+\]/g, '')
     .replace(/\[.*?\]/g, '')
     .trim()
     .replace(/[.,]+$/, '');
+
+  const prefixes = /\b(Dr\.|Mr\.|Mrs\.|Ms\.|Miss|Prof\.|Professor)\b/gi;
+  cleaned = cleaned.replace(prefixes, '');
+
+  const suffixes = /\b(PhD|MBA|MD|Jr\.|Sr\.||Esq\.)\b/gi;
+  cleaned = cleaned.replace(suffixes, '');
+
+  cleaned = cleaned.replace(/\b[A-Z]\.\s*/g, '');
+
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  return cleaned;
 }
 
 function cleanEmail(email: string): string {
@@ -334,23 +346,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const { data: enrichResult, error: fetchUserError } = await supabaseAdmin
       .from('enrich_results')
       .select('user_id')
-      .eq('id', resultId)
+      .eq('id', resultId as string)
       .single();
 
     if (!fetchUserError && enrichResult?.user_id) {
       const { data: userData, error: userError } = await supabaseAdmin
         .from('users')
-        .select('tokens_used')
+        .select('user_tokens')
         .eq('id', enrichResult.user_id)
         .single();
 
       if (!userError && userData) {
-        const currentTokens = userData.tokens_used || 0;
-        const newTokens = currentTokens + enrichedResults.length;
+        const currentTokens = userData.user_tokens || 0;
+        const newTokens = currentTokens - enrichedResults.length;
 
         await supabaseAdmin
           .from('users')
-          .update({ tokens_used: newTokens })
+          .update({ user_tokens: newTokens })
           .eq('id', enrichResult.user_id);
       }
     }
@@ -363,7 +375,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         result_count: enrichedResults.length,
         updated_at: new Date().toISOString()
       })
-      .eq('id', resultId);
+      .eq('id', resultId as string);
 
     if (updateError) {
       throw new Error(`Error updating record: ${updateError.message}`);

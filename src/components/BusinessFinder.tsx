@@ -5,6 +5,11 @@ import Button from './Button';
 import Toast from './Toast';
 import YouTubeModal from './YouTubeModal';
 import { supabase } from '../lib/supabase/supabaseClient';
+import zipcodesData from '../data/zipcodes.json';
+
+// Define the type for zipcodes
+type Zipcode = { zip: string; city: string; state_id: string; state_name: string };
+const zipcodes = zipcodesData as Zipcode[];
 
 export default function BusinessFinder() {
   const [citiesFile, setCitiesFile] = useState<File | null>(null);
@@ -99,21 +104,14 @@ export default function BusinessFinder() {
      
       const combinedRows = [];
       for (const { city, state } of cities) {
-        const { data: zipCodes, error } = await supabase
-          .from('zip_codes')
-          .select('zip')
-          .eq('city', city)
-          .or(`state_id.eq.${state},state_name.eq.${state}`);
-
-        if (error) {
-          throw new Error(`Error fetching zip codes: ${error.message}`);
-        }
-
+        const zipCodes = zipcodes.filter(z =>
+          z.city.toLowerCase() === city.toLowerCase() &&
+          (z.state_id.toLowerCase() === state.toLowerCase() || z.state_name.toLowerCase() === state.toLowerCase())
+        );
         if (!zipCodes || zipCodes.length === 0) {
           console.warn(`No zip codes found for city: ${city}, state: ${state}`);
           continue;
         }
-
         for (const query of queries) {
           for (const { zip } of zipCodes) {
             combinedRows.push({
