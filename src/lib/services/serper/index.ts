@@ -84,7 +84,21 @@ export async function runSerper(rows: SerperQueryRow[]): Promise<{ results: Serp
         rows = rows.slice(0, 10);
     }
     
-    const chunks = chunk(rows, serperConfig.maxWorkers);
+    // Filter out rows with missing or non-letter required fields
+    const validRows = rows.filter(row => {
+        const hasMeaningfulContent = (value: string): boolean => {
+            const lettersOnly = value.replace(/[^a-zA-Z]/g, '');
+            return lettersOnly.length > 0;
+        };
+        return hasMeaningfulContent(row.query) && hasMeaningfulContent(row.city) && !!row.zip;
+    });
+    
+    if (validRows.length === 0) {
+        console.warn('No valid rows found after filtering.');
+        return { results: [], creditsUsed: 0 };
+    }
+    
+    const chunks = chunk(validRows, serperConfig.maxWorkers);
 
     for (const chunk of chunks) {
         const chunkPromises = chunk.map(async (row: SerperQueryRow) => {

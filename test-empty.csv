@@ -1,0 +1,7 @@
+query,city,zip,state,extra1,extra2
+"coffee shop","New York","10001","NY",,
+"bakery","Boston","02108","MA",,
+"restaurant","Chicago","60601","IL",,
+"cafe","Los Angeles","90001","CA",,
+"pizza place","Miami","90210","FL",,
+"gym","Seattle","10001","NY",, 

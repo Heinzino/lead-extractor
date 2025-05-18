@@ -48,50 +48,39 @@ export default function FileUploaderBox({
           return lettersOnly.length > 0;
         };
 
+        let validRowCount = 0;
         for (let i = 1; i < lines.length; i++) {
           const values = lines[i].split(',').map(v => v.trim());
           const rowData = Object.fromEntries(headers.map((h, idx) => [h, values[idx]]));
-          
+          let isValidRow = false;
           switch(type) {
             case 'cities':
-              if (!hasMeaningfulContent(rowData.city || '') || !hasMeaningfulContent(rowData.state || '')) {
-                return {
-                  isValid: false,
-                  message: `Row ${i} is missing meaningful "city" or "state" values`
-                };
-              }
+              isValidRow = hasMeaningfulContent(rowData.city || '') && hasMeaningfulContent(rowData.state || '');
               break;
             case 'queries':
-              if (!hasMeaningfulContent(rowData.query || '')) {
-                return {
-                  isValid: false,
-                  message: `Row ${i} is missing meaningful "query" value`
-                };
-              }
+              isValidRow = hasMeaningfulContent(rowData.query || '');
               break;
             case 'combined':
-              if (!hasMeaningfulContent(rowData.query || '') || 
-                  !hasMeaningfulContent(rowData.city || '') || 
-                  !hasMeaningfulContent(rowData.state || '') || 
-                  !rowData.zip) {
-                return {
-                  isValid: false,
-                  message: `Row ${i} is missing meaningful "query", "city", "state", or "zip" values`
-                };
-              }
+              isValidRow = hasMeaningfulContent(rowData.query || '') && 
+                           hasMeaningfulContent(rowData.city || '') && 
+                           hasMeaningfulContent(rowData.state || '') && 
+                           !!rowData.zip;
               break;
             case 'businesses':
-              if (!hasMeaningfulContent(rowData.company || '') || !rowData.website) {
-                return {
-                  isValid: false,
-                  message: `Row ${i} is missing meaningful "company" or "website" values`
-                };
-              }
+              isValidRow = hasMeaningfulContent(rowData.company || '') && !!rowData.website;
               break;
           }
+          if (isValidRow) validRowCount++;
         }
 
-        return { isValid: true };
+        if (validRowCount > 0) {
+          return { isValid: true };
+        } else {
+          return {
+            isValid: false,
+            message: 'No valid rows found in file. Please ensure at least one row has all required fields with meaningful values.'
+          };
+        }
       } catch (error) {
         return {
           isValid: false,
