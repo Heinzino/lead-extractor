@@ -96,6 +96,11 @@ export default function BusinessFinder() {
           .trim();
       };
 
+      const hasMeaningfulContent = (text: string): boolean => {
+        const lettersOnly = text.replace(/[^a-zA-Z\s]/g, '');
+        return lettersOnly.length > 0;
+      };
+
       
       const cities = citiesText
         .split('\n')
@@ -105,7 +110,9 @@ export default function BusinessFinder() {
           const [city, state] = line.split(',').map(cleanText);
           return { city, state };
         })
-        .filter(({ city, state }) => city && state); 
+        .filter(({ city, state }) => 
+          city && state && hasMeaningfulContent(city) && hasMeaningfulContent(state)
+        );
 
       
       const queries = queriesText
@@ -113,7 +120,7 @@ export default function BusinessFinder() {
         .slice(1) 
         .filter(line => line.trim())
         .map(cleanText)
-        .filter(query => query); 
+        .filter(query => query && hasMeaningfulContent(query));
 
       if (cities.length === 0 || queries.length === 0) {
         setToastMessage('No valid cities or queries found after filtering.');
