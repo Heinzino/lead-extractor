@@ -7,7 +7,7 @@ import YouTubeModal from './YouTubeModal';
 import { supabase } from '../lib/supabase/supabaseClient';
 import zipcodesData from '../data/zipcodes.json';
 
-// Define the type for zipcodes
+
 type Zipcode = { zip: string; city: string; state_id: string; state_name: string };
 const zipcodes = zipcodesData as Zipcode[];
 
@@ -86,32 +86,56 @@ export default function BusinessFinder() {
       const citiesText = await citiesFile.text();
       const queriesText = await queriesFile.text();
 
+      
+      const cleanText = (text: string): string => {
+        return text
+          .trim()
+          .replace(/^["']|["']$/g, '') 
+          .replace(/["']/g, '') 
+          .replace(/\s+/g, ' ') 
+          .trim();
+      };
+
+      
       const cities = citiesText
         .split('\n')
-        .slice(1)
+        .slice(1) 
         .filter(line => line.trim())
         .map(line => {
-          const [city, state] = line.split(',').map(s => s.trim());
+          const [city, state] = line.split(',').map(cleanText);
           return { city, state };
-        });
+        })
+        .filter(({ city, state }) => city && state); 
 
+      
       const queries = queriesText
         .split('\n')
-        .slice(1)
+        .slice(1) 
         .filter(line => line.trim())
-        .map(line => line.trim());
+        .map(cleanText)
+        .filter(query => query); 
 
-     
+      if (cities.length === 0 || queries.length === 0) {
+        setToastMessage('No valid cities or queries found after filtering.');
+        setToastType('error');
+        setShowToast(true);
+        setIsGeneratingCombined(false);
+        return;
+      }
+
       const combinedRows = [];
       for (const { city, state } of cities) {
+        
         const zipCodes = zipcodes.filter(z =>
           z.city.toLowerCase() === city.toLowerCase() &&
           (z.state_id.toLowerCase() === state.toLowerCase() || z.state_name.toLowerCase() === state.toLowerCase())
         );
+
         if (!zipCodes || zipCodes.length === 0) {
           console.warn(`No zip codes found for city: ${city}, state: ${state}`);
           continue;
         }
+
         for (const query of queries) {
           for (const { zip } of zipCodes) {
             combinedRows.push({
@@ -124,14 +148,20 @@ export default function BusinessFinder() {
         }
       }
 
-     
+      if (combinedRows.length === 0) {
+        setToastMessage('No valid combinations found. Please check your city and state names.');
+        setToastType('error');
+        setShowToast(true);
+        setIsGeneratingCombined(false);
+        return;
+      }
+
       const csvHeader = 'query,city,state,zip\n';
       const csvRows = combinedRows.map(row => 
         `${row.query},${row.city},${row.state},${row.zip}`
       ).join('\n');
       const csvContent = csvHeader + csvRows;
 
-     
       const blob = new Blob([csvContent], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
