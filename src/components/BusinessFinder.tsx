@@ -23,7 +23,6 @@ export default function BusinessFinder() {
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'error' | 'success'>('success');
-  const [hasUploadError, setHasUploadError] = useState(false);
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
   const [fileName, setFileName] = useState('');
 
@@ -60,7 +59,6 @@ export default function BusinessFinder() {
   }, []);
 
   const handleValidationError = useCallback((error: string) => {
-    setHasUploadError(true);
     setToastMessage(error);
     setToastType('error');
     setShowToast(true);
@@ -202,6 +200,13 @@ export default function BusinessFinder() {
 
     if (!fileName) {
       setToastMessage('Please enter a name for your file');
+      setToastType('error');
+      setShowToast(true);
+      return;
+    }
+
+    if (!fileName.match(/^[a-zA-Z0-9-_]+$/)) {
+      setToastMessage('File name can only contain letters, numbers, hyphens, and underscores');
       setToastType('error');
       setShowToast(true);
       return;
@@ -524,7 +529,7 @@ export default function BusinessFinder() {
           <Button
             text="Run Serper Queries"
             onClick={handleSerperQueries}
-            disabled={isRunningSerper || !combinedFile || hasUploadError}
+            disabled={isRunningSerper || !combinedFile}
             isLoading={isRunningSerper}
             width={48}
             height={16}
