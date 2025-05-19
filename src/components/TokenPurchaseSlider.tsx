@@ -7,7 +7,7 @@ import { Stripe } from '@stripe/stripe-js';
 import PaymentModal from './PaymentModal';
 import { useRouter } from 'next/router';
 
-const TOKENS_PER_DOLLAR = 1000;
+const TOKENS_PER_DOLLAR = 100;
 
 interface TokenPurchaseSliderProps {
   onPurchaseSuccess?: () => void;
