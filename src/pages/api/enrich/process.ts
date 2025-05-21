@@ -338,7 +338,6 @@ async function enrichRow(row: EnrichRow) {
     };
   }
   
-  // First check if we already have an email for this domain in cache
   if (domain && domainEmailCache.has(domain)) {
     websiteEmail = domainEmailCache.get(domain)!;
     if (name.toLowerCase() !== 'na') {
