@@ -69,11 +69,28 @@ export default function BusinessFinder() {
     link.href = `/${fileName}`;
     link.download = fileName;
     link.click();
+    setToastMessage(`Sample ${fileName} downloaded successfully`);
+    setToastType('success');
+    setShowToast(true);
   }, []);
 
   const handleGenerate = useCallback(async () => {
-    if (!citiesFile || !queriesFile) {
-      setToastMessage('Please upload both Cities and Queries files');
+    if (!citiesFile && !queriesFile) {
+      setToastMessage('❌ Please upload both Cities and Queries files to generate the combined CSV');
+      setToastType('error');
+      setShowToast(true);
+      return;
+    }
+
+    if (!citiesFile) {
+      setToastMessage('❌ Please upload a Cities file to generate the combined CSV');
+      setToastType('error');
+      setShowToast(true);
+      return;
+    }
+
+    if (!queriesFile) {
+      setToastMessage('❌ Please upload a Queries file to generate the combined CSV');
       setToastType('error');
       setShowToast(true);
       return;
@@ -191,15 +208,22 @@ export default function BusinessFinder() {
   }, [citiesFile, queriesFile]);
 
   const handleSerperQueries = useCallback(async () => {
+    if (!combinedFile && !fileName) {
+      setToastMessage('❌ Please upload a combined CSV file and enter a file name to run queries');
+      setToastType('error');
+      setShowToast(true);
+      return;
+    }
+
     if (!combinedFile) {
-      setToastMessage('Please upload the combined CSV file');
+      setToastMessage('❌ Please upload a combined CSV file to run queries');
       setToastType('error');
       setShowToast(true);
       return;
     }
 
     if (!fileName) {
-      setToastMessage('Please enter a name for your file');
+      setToastMessage('❌ Please enter a name for your file to run queries');
       setToastType('error');
       setShowToast(true);
       return;
@@ -295,10 +319,19 @@ export default function BusinessFinder() {
   const removeFile = useCallback((type: 'cities' | 'queries' | 'combined') => {
     if (type === 'cities') {
       setCitiesFile(null);
+      setToastMessage('Cities file removed successfully');
+      setToastType('success');
+      setShowToast(true);
     } else if (type === 'combined') {
       setCombinedFile(null);
+      setToastMessage('Combined file removed successfully');
+      setToastType('success');
+      setShowToast(true);
     } else {
       setQueriesFile(null);
+      setToastMessage('Queries file removed successfully');
+      setToastType('success');
+      setShowToast(true);
     }
   }, []);
 
@@ -453,7 +486,6 @@ export default function BusinessFinder() {
           <Button
             text="Generate Combined CSV"
             onClick={handleGenerate}
-            disabled={isGeneratingCombined || !citiesFile || !queriesFile}
             isLoading={isGeneratingCombined}
             width={48}
             height={16}
@@ -529,7 +561,6 @@ export default function BusinessFinder() {
           <Button
             text="Run Serper Queries"
             onClick={handleSerperQueries}
-            disabled={isRunningSerper || !combinedFile}
             isLoading={isRunningSerper}
             width={48}
             height={16}
