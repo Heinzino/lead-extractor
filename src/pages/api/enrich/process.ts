@@ -44,22 +44,26 @@ function normalizeDomain(url: string): string {
 }
 
 function cleanName(name: string): string {
-  // Remove bracketed content and trailing punctuation
+  // Remove bracketed content
   let cleaned = name
     .replace(/\[\d+\]/g, '')
     .replace(/\[.*?\]/g, '')
-    .trim()
-    .replace(/[.,]+$/, '');
+    .trim();
 
-  const prefixes = /\b(Dr\.|Mr\.|Mrs\.|Ms\.|Miss|Prof\.|Professor)\b/gi;
-  cleaned = cleaned.replace(prefixes, '');
+  // Remove prefixes (with or without period) - using lookahead to ensure it's a complete word
+  const prefixes = /(?:^|\s)(?:Dr\.?|Mr\.?|Mrs\.?|Ms\.?|Miss|Prof\.?|Professor)(?=\s|$)/gi;
+  cleaned = cleaned.replace(prefixes, '').trim();
 
-  const suffixes = /\b(PhD|MBA|MD|Jr\.|Sr\.||Esq\.)\b/gi;
-  cleaned = cleaned.replace(suffixes, '');
+  // Remove suffixes (with or without period)
+  const suffixes = /\s(?:PhD|MBA|MD|JD|DDS|DMD|DO|RN|NP|PA|Jr\.?|Sr\.?|Esq\.?|I{2,3}|IV|V)(?=\s|$)/gi;
+  cleaned = cleaned.replace(suffixes, '').trim();
 
-  cleaned = cleaned.replace(/\b[A-Z]\.\s*/g, '');
+  // Clean up middle initials and extra spaces
+  cleaned = cleaned
+    .replace(/\s+/, ' ') // Replace multiple spaces with single space
+    .replace(/\s*[,\.]+\s*/g, ' ') // Remove commas and periods with surrounding spaces
+    .trim();
 
-  cleaned = cleaned.replace(/\s+/g, ' ').trim();
   return cleaned;
 }
 
