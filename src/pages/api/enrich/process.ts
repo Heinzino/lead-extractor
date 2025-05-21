@@ -44,7 +44,6 @@ function normalizeDomain(url: string): string {
 }
 
 function cleanName(name: string): string {
-  // Remove bracketed content
   let cleaned = name
     .replace(/\[\d+\]/g, '')
     .replace(/\[.*?\]/g, '')
@@ -132,36 +131,26 @@ async function waitForFindymailToken(): Promise<void> {
 function extractNameFromResponse(content: string): string {
   if (!content) return 'na';
   
-  // First, check for simple 'na' response (case insensitive)
   const trimmedContent = content.trim();
   if (trimmedContent.toLowerCase() === 'na') return 'na';
-  
-  // Try to find a name pattern in the response
-  // Look for patterns like "Firstname Lastname" or "Lastname, Firstname"
+
   const patterns = [
-    // Match "Firstname Lastname" at the start of the response
     /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)(?:\s|\(|$)/,
-    // Match "Lastname, Firstname" pattern
     /([A-Z][a-z]+,\s*[A-Z][a-z]+)/,
-    // Match any two or more capitalized words
     /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/,
-    // Match single word names (as a last resort)
     /(\b[A-Z][a-z]+\b)/
   ];
 
-  // Try each pattern in order
   for (const pattern of patterns) {
     const match = trimmedContent.match(pattern);
     if (match && match[1]) {
-      // Clean up the match (remove any trailing punctuation)
       const name = match[1].replace(/[^\w\s,]/g, '').trim();
-      if (name.split(/\s+/).length <= 4) { // Avoid very long names that might be false positives
+      if (name.split(/\s+/).length <= 4) {
         return name;
       }
     }
   }
   
-  // If we can't find a name, return 'na'
   return 'na';
 }
 
@@ -180,8 +169,8 @@ async function callPerplexity(user: string, system: string) {
         content: user + '\n\nIMPORTANT: Respond with ONLY the full name or "na". Do not include any explanations, notes, or additional text.'
       },
     ],
-    temperature: 0.3, // Lower temperature for more focused responses
-    max_tokens: 50,   // Limit response length
+    temperature: 0.3, 
+    max_tokens: 50,
   };
 
   try {
@@ -278,7 +267,6 @@ async function processRow(row: EnrichRow, jobTitle: string) {
   }));
 }
 
-// Cache for storing website emails by domain to avoid duplicate lookups
 const domainEmailCache = new Map<string, string>();
 
 async function enrichRow(row: EnrichRow) {
@@ -288,20 +276,14 @@ async function enrichRow(row: EnrichRow) {
   let personEmail = 'na';
   let websiteEmail = row['Website Email'] || 'na';
   
-  // Check if we already have a website email for this domain
   if (domain && domainEmailCache.has(domain)) {
     websiteEmail = domainEmailCache.get(domain)!;
   }
 
-  // Only try to find person email if we have a valid name
   if (name.toLowerCase() !== 'na') {
     personEmail = await callFindymail(name, domain);
   }
 
-  // Only try to find fallback email if:
-  // 1. We don't have a person email AND
-  // 2. We don't already have a website email from any source
-  // 3. We haven't already processed this domain
   if ((!personEmail || personEmail.toLowerCase() === 'na') && 
       (!websiteEmail || websiteEmail.toLowerCase() === 'na') &&
       domain && !domainEmailCache.has(domain)) {
@@ -314,7 +296,6 @@ async function enrichRow(row: EnrichRow) {
             fallbackResult.content.includes('@') && 
             fallbackResult.content.includes('.')) {
           websiteEmail = cleanEmail(fallbackResult.content);
-          // Cache the website email for this domain
           domainEmailCache.set(domain, websiteEmail);
           break;
         }
@@ -324,14 +305,12 @@ async function enrichRow(row: EnrichRow) {
       }
     }
   } else if (websiteEmail && websiteEmail.toLowerCase() !== 'na') {
-    // Cache the existing website email for this domain if not already cached
     if (domain && !domainEmailCache.has(domain)) {
       domainEmailCache.set(domain, websiteEmail);
     }
 
   }
 
-  // Make sure we're using the cached website email if available
   const finalWebsiteEmail = domain && domainEmailCache.has(domain) 
     ? domainEmailCache.get(domain)! 
     : websiteEmail;
