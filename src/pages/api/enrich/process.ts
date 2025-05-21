@@ -50,18 +50,15 @@ function cleanName(name: string): string {
     .replace(/\[.*?\]/g, '')
     .trim();
 
-  // Remove prefixes (with or without period) - using lookahead to ensure it's a complete word
   const prefixes = /(?:^|\s)(?:Dr\.?|Mr\.?|Mrs\.?|Ms\.?|Miss|Prof\.?|Professor)(?=\s|$)/gi;
   cleaned = cleaned.replace(prefixes, '').trim();
 
-  // Remove suffixes (with or without period)
   const suffixes = /\s(?:PhD|MBA|MD|JD|DDS|DMD|DO|RN|NP|PA|Jr\.?|Sr\.?|Esq\.?|I{2,3}|IV|V)(?=\s|$)/gi;
   cleaned = cleaned.replace(suffixes, '').trim();
 
-  // Clean up middle initials and extra spaces
   cleaned = cleaned
-    .replace(/\s+/, ' ') // Replace multiple spaces with single space
-    .replace(/\s*[,\.]+\s*/g, ' ') // Remove commas and periods with surrounding spaces
+    .replace(/\s+/, ' ')
+    .replace(/\s*[,\.]+\s*/g, ' ')
     .trim();
 
   return cleaned;
