@@ -69,11 +69,28 @@ export default function BusinessFinder() {
     link.href = `/${fileName}`;
     link.download = fileName;
     link.click();
+    setToastMessage(`Sample ${fileName} downloaded successfully`);
+    setToastType('success');
+    setShowToast(true);
   }, []);
 
   const handleGenerate = useCallback(async () => {
-    if (!citiesFile || !queriesFile) {
-      setToastMessage('Please upload both Cities and Queries files');
+    if (!citiesFile && !queriesFile) {
+      setToastMessage('❌ Please upload both Cities and Queries files to generate the combined CSV');
+      setToastType('error');
+      setShowToast(true);
+      return;
+    }
+
+    if (!citiesFile) {
+      setToastMessage('❌ Please upload a Cities file to generate the combined CSV');
+      setToastType('error');
+      setShowToast(true);
+      return;
+    }
+
+    if (!queriesFile) {
+      setToastMessage('❌ Please upload a Queries file to generate the combined CSV');
       setToastType('error');
       setShowToast(true);
       return;
@@ -85,13 +102,12 @@ export default function BusinessFinder() {
       const queriesText = await queriesFile.text();
 
       
-      const cleanText = (text: string): string => {
-        return text
-          .trim()
-          .replace(/^["']|["']$/g, '') 
-          .replace(/["']/g, '') 
-          .replace(/\s+/g, ' ') 
-          .trim();
+      const cleanText = (text: string, preserveQuotes = false): string => {
+        let cleaned = text.trim();
+        if (!preserveQuotes) {
+          cleaned = cleaned.replace(/^["']|["']$/g, '');
+        }
+        return cleaned.replace(/\s+/g, ' ').trim();
       };
 
       const hasMeaningfulContent = (text: string): boolean => {
@@ -105,7 +121,9 @@ export default function BusinessFinder() {
         .slice(1) 
         .filter(line => line.trim())
         .map(line => {
-          const [city, state] = line.split(',').map(cleanText);
+          const parts = line.match(/(?:[^,"]|"[^"]*")+/g) || [];
+          const city = cleanText(parts[0] || '', true);
+          const state = cleanText(parts[1] || '', true);
           return { city, state };
         })
         .filter(({ city, state }) => 
@@ -113,12 +131,22 @@ export default function BusinessFinder() {
         );
 
       
-      const queries = queriesText
-        .split('\n')
-        .slice(1) 
-        .filter(line => line.trim())
-        .map(cleanText)
-        .filter(query => query && hasMeaningfulContent(query));
+      const queryLines = queriesText.split('\n');
+      const queries = queryLines
+        .slice(1)
+        .map(line => {
+          const parts = line.split(',').map(part => part.trim()).filter(part => part);
+          if (parts.length === 0) return null;
+          
+          let query = parts[0];
+          
+          query = query.replace(/^["']|["']$/g, '').trim();
+          
+          return query ? query : null;
+        })
+        .filter((query): query is string => Boolean(query && hasMeaningfulContent(query)));
+      
+      console.log('Processed queries:', queries);
 
       if (cities.length === 0 || queries.length === 0) {
         setToastMessage('No valid cities or queries found after filtering.');
@@ -161,10 +189,33 @@ export default function BusinessFinder() {
         return;
       }
 
+      const formatCsvRow = (row: { query: string; city: string; state: string; zip: string }): string => {
+        const escapeCsv = (field: string): string => {
+          if (field.includes(',') || field.includes('"') || field.includes('\n')) {
+            return `"${field.replace(/"/g, '""')}"`;
+          }
+          return field;
+        };
+
+        const cleanField = (field: string): string => {
+          return field.replace(/^["']|["']$/g, '').trim();
+        };
+
+        const cleanedQuery = cleanField(row.query);
+        const cleanedCity = cleanField(row.city);
+        const cleanedState = cleanField(row.state);
+        const cleanedZip = cleanField(row.zip);
+
+        return [
+          escapeCsv(cleanedQuery),
+          escapeCsv(cleanedCity),
+          escapeCsv(cleanedState),
+          escapeCsv(cleanedZip)
+        ].join(',');
+      };
+
       const csvHeader = 'query,city,state,zip\n';
-      const csvRows = combinedRows.map(row => 
-        `${row.query},${row.city},${row.state},${row.zip}`
-      ).join('\n');
+      const csvRows = combinedRows.map(row => formatCsvRow(row)).join('\n');
       const csvContent = csvHeader + csvRows;
 
       const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -191,15 +242,22 @@ export default function BusinessFinder() {
   }, [citiesFile, queriesFile]);
 
   const handleSerperQueries = useCallback(async () => {
+    if (!combinedFile && !fileName) {
+      setToastMessage('❌ Please upload a combined CSV file and enter a file name to run queries');
+      setToastType('error');
+      setShowToast(true);
+      return;
+    }
+
     if (!combinedFile) {
-      setToastMessage('Please upload the combined CSV file');
+      setToastMessage('❌ Please upload a combined CSV file to run queries');
       setToastType('error');
       setShowToast(true);
       return;
     }
 
     if (!fileName) {
-      setToastMessage('Please enter a name for your file');
+      setToastMessage('❌ Please enter a name for your file to run queries');
       setToastType('error');
       setShowToast(true);
       return;
@@ -224,7 +282,8 @@ export default function BusinessFinder() {
         .map(line => {
           const [query, city, state, zip] = line.split(',').map(s => s.trim());
           return { query, city, state, zip };
-        });
+        })
+        .filter(row => row.query && row.city && row.state && row.zip);
      
 
       const { data: user } = await supabase.auth.getUser();
@@ -295,10 +354,19 @@ export default function BusinessFinder() {
   const removeFile = useCallback((type: 'cities' | 'queries' | 'combined') => {
     if (type === 'cities') {
       setCitiesFile(null);
+      setToastMessage('Cities file removed successfully');
+      setToastType('success');
+      setShowToast(true);
     } else if (type === 'combined') {
       setCombinedFile(null);
+      setToastMessage('Combined file removed successfully');
+      setToastType('success');
+      setShowToast(true);
     } else {
       setQueriesFile(null);
+      setToastMessage('Queries file removed successfully');
+      setToastType('success');
+      setShowToast(true);
     }
   }, []);
 
@@ -453,7 +521,6 @@ export default function BusinessFinder() {
           <Button
             text="Generate Combined CSV"
             onClick={handleGenerate}
-            disabled={isGeneratingCombined || !citiesFile || !queriesFile}
             isLoading={isGeneratingCombined}
             width={48}
             height={16}
@@ -529,7 +596,6 @@ export default function BusinessFinder() {
           <Button
             text="Run Serper Queries"
             onClick={handleSerperQueries}
-            disabled={isRunningSerper || !combinedFile}
             isLoading={isRunningSerper}
             width={48}
             height={16}

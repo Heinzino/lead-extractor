@@ -44,22 +44,22 @@ function normalizeDomain(url: string): string {
 }
 
 function cleanName(name: string): string {
-  // Remove bracketed content and trailing punctuation
   let cleaned = name
     .replace(/\[\d+\]/g, '')
     .replace(/\[.*?\]/g, '')
-    .trim()
-    .replace(/[.,]+$/, '');
+    .trim();
 
-  const prefixes = /\b(Dr\.|Mr\.|Mrs\.|Ms\.|Miss|Prof\.|Professor)\b/gi;
-  cleaned = cleaned.replace(prefixes, '');
+  const prefixes = /(?:^|\s)(?:Dr\.?|Mr\.?|Mrs\.?|Ms\.?|Miss|Prof\.?|Professor)(?=\s|$)/gi;
+  cleaned = cleaned.replace(prefixes, '').trim();
 
-  const suffixes = /\b(PhD|MBA|MD|Jr\.|Sr\.||Esq\.)\b/gi;
-  cleaned = cleaned.replace(suffixes, '');
+  const suffixes = /\s(?:PhD|MBA|MD|JD|DDS|DMD|DO|RN|NP|PA|Jr\.?|Sr\.?|Esq\.?|I{2,3}|IV|V)(?=\s|$)/gi;
+  cleaned = cleaned.replace(suffixes, '').trim();
 
-  cleaned = cleaned.replace(/\b[A-Z]\.\s*/g, '');
+  cleaned = cleaned
+    .replace(/\s+/, ' ')
+    .replace(/\s*[,\.]+\s*/g, ' ')
+    .trim();
 
-  cleaned = cleaned.replace(/\s+/g, ' ').trim();
   return cleaned;
 }
 
@@ -128,35 +128,77 @@ async function waitForFindymailToken(): Promise<void> {
   findymailTokens--;
 }
 
+function extractNameFromResponse(content: string): string {
+  if (!content) return 'na';
+  
+  const trimmedContent = content.trim();
+  if (trimmedContent.toLowerCase() === 'na') return 'na';
+
+  const patterns = [
+    /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)(?:\s|\(|$)/,
+    /([A-Z][a-z]+,\s*[A-Z][a-z]+)/,
+    /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/,
+    /(\b[A-Z][a-z]+\b)/
+  ];
+
+  for (const pattern of patterns) {
+    const match = trimmedContent.match(pattern);
+    if (match && match[1]) {
+      const name = match[1].replace(/[^\w\s,]/g, '').trim();
+      if (name.split(/\s+/).length <= 4) {
+        return name;
+      }
+    }
+  }
+  
+  return 'na';
+}
+
 async function callPerplexity(user: string, system: string) {
   await waitForPerplexityToken();
   
   const body = {
     model: PPLX_MODEL,
     messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
+      { 
+        role: 'system', 
+        content: system + '\n\nIMPORTANT: Respond with ONLY the full name or "na". Do not include any explanations, notes, or additional text.' 
+      },
+      { 
+        role: 'user', 
+        content: user + '\n\nIMPORTANT: Respond with ONLY the full name or "na". Do not include any explanations, notes, or additional text.'
+      },
     ],
+    temperature: 0.3, 
+    max_tokens: 50,
   };
 
-  const res = await fetch(PPLX_API_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${PPLX_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
+  try {
+    const res = await fetch(PPLX_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${PPLX_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
 
-  if (!res.ok) {
-    throw new Error(`Perplexity API error: ${res.statusText}`);
+    if (!res.ok) {
+      throw new Error(`Perplexity API error: ${res.statusText}`);
+    }
+
+    const json = await res.json();
+    let content = json.choices?.[0]?.message?.content?.trim() || 'na';
+    const tokens = json.usage?.total_tokens || 1000;
+    const cost = (tokens / 1000) * PPLX_COST_PER_1K_TOKENS;
+    
+    content = extractNameFromResponse(content);
+    
+    return { content, cost, status: 'success' };
+  } catch (error) {
+    console.error('Error in callPerplexity:', error);
+    return { content: 'na', cost: 0, status: 'error' };
   }
-
-  const json = await res.json();
-  const content = json.choices?.[0]?.message?.content?.trim() || 'na';
-  const tokens = json.usage?.total_tokens || 1000;
-  const cost = (tokens / 1000) * PPLX_COST_PER_1K_TOKENS;
-  return { content, cost, status: 'success' };
 }
 
 async function callFindymail(name: string, domain: string) {
@@ -225,18 +267,27 @@ async function processRow(row: EnrichRow, jobTitle: string) {
   }));
 }
 
+const domainEmailCache = new Map<string, string>();
+
 async function enrichRow(row: EnrichRow) {
   const name = row['Found Person Name'];
   const domain = row['Normalized Domain'];
   
   let personEmail = 'na';
-  let websiteEmail = 'na';
+  let websiteEmail = row['Website Email'] || 'na';
+  
+  if (domain && domainEmailCache.has(domain)) {
+    websiteEmail = domainEmailCache.get(domain)!;
+  }
 
   if (name.toLowerCase() !== 'na') {
     personEmail = await callFindymail(name, domain);
   }
 
-  if (!personEmail || personEmail.toLowerCase() === 'na') {
+  if ((!personEmail || personEmail.toLowerCase() === 'na') && 
+      (!websiteEmail || websiteEmail.toLowerCase() === 'na') &&
+      domain && !domainEmailCache.has(domain)) {
+
     const fallback = generateFallbackPrompt(domain);
     for (let i = 0; i < 3; i++) {
       try {
@@ -245,19 +296,30 @@ async function enrichRow(row: EnrichRow) {
             fallbackResult.content.includes('@') && 
             fallbackResult.content.includes('.')) {
           websiteEmail = cleanEmail(fallbackResult.content);
+          domainEmailCache.set(domain, websiteEmail);
           break;
         }
-      } catch {
+      } catch (error) {
+        console.error(`Error in fallback email lookup (attempt ${i + 1}):`, error);
         await new Promise(r => setTimeout(r, 2 ** i * CONFIG.retryDelay));
       }
     }
+  } else if (websiteEmail && websiteEmail.toLowerCase() !== 'na') {
+    if (domain && !domainEmailCache.has(domain)) {
+      domainEmailCache.set(domain, websiteEmail);
+    }
+
   }
 
+  const finalWebsiteEmail = domain && domainEmailCache.has(domain) 
+    ? domainEmailCache.get(domain)! 
+    : websiteEmail;
+    
   return {
     ...row,
     'Person Email': personEmail,
-    'Website Email': websiteEmail,
-    'Final Email': personEmail !== 'na' ? personEmail : websiteEmail,
+    'Website Email': finalWebsiteEmail,
+    'Final Email': personEmail !== 'na' ? personEmail : finalWebsiteEmail,
   };
 }
 
