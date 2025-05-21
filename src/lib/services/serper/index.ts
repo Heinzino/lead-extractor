@@ -84,7 +84,6 @@ export async function runSerper(rows: SerperQueryRow[]): Promise<{ results: Serp
         rows = rows.slice(0, 10);
     }
     
-    // Filter out rows with missing or non-letter required fields
     const validRows = rows.filter(row => {
         const hasMeaningfulContent = (value: string): boolean => {
             const lettersOnly = value.replace(/[^a-zA-Z]/g, '');

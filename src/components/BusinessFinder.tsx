@@ -121,7 +121,6 @@ export default function BusinessFinder() {
         .slice(1) 
         .filter(line => line.trim())
         .map(line => {
-          // Split by comma but handle quoted values
           const parts = line.match(/(?:[^,"]|"[^"]*")+/g) || [];
           const city = cleanText(parts[0] || '', true);
           const state = cleanText(parts[1] || '', true);
@@ -132,28 +131,22 @@ export default function BusinessFinder() {
         );
 
       
-      // Process the queries text
       const queryLines = queriesText.split('\n');
-      // Skip the header and process each line
       const queries = queryLines
-        .slice(1) // Skip header
+        .slice(1)
         .map(line => {
-          // Split by commas and get the first non-empty part
           const parts = line.split(',').map(part => part.trim()).filter(part => part);
           if (parts.length === 0) return null;
           
-          // Take the first non-empty part as the query
           let query = parts[0];
           
-          // Remove surrounding quotes if they exist
           query = query.replace(/^["']|["']$/g, '').trim();
           
-          // Skip if the query is empty after cleaning
           return query ? query : null;
         })
         .filter((query): query is string => Boolean(query && hasMeaningfulContent(query)));
       
-      console.log('Processed queries:', queries); // Debug log
+      console.log('Processed queries:', queries);
 
       if (cities.length === 0 || queries.length === 0) {
         setToastMessage('No valid cities or queries found after filtering.');
@@ -196,18 +189,14 @@ export default function BusinessFinder() {
         return;
       }
 
-      // Function to safely format a CSV row
       const formatCsvRow = (row: { query: string; city: string; state: string; zip: string }): string => {
         const escapeCsv = (field: string): string => {
-          // If the field contains commas, quotes, or newlines, wrap it in quotes
           if (field.includes(',') || field.includes('"') || field.includes('\n')) {
-            // Escape any double quotes by doubling them
             return `"${field.replace(/"/g, '""')}"`;
           }
           return field;
         };
 
-        // Clean each field - remove any existing surrounding quotes and trim
         const cleanField = (field: string): string => {
           return field.replace(/^["']|["']$/g, '').trim();
         };
@@ -294,7 +283,7 @@ export default function BusinessFinder() {
           const [query, city, state, zip] = line.split(',').map(s => s.trim());
           return { query, city, state, zip };
         })
-        .filter(row => row.query && row.city && row.state && row.zip); // Only include complete rows
+        .filter(row => row.query && row.city && row.state && row.zip);
      
 
       const { data: user } = await supabase.auth.getUser();

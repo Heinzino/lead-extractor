@@ -9,7 +9,7 @@ const sidebarItems = [
 ];
 
 export default function Sidebar({ activePage, setActivePage }: { activePage: string, setActivePage: (page: string) => void }) {
-  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false); // Closed by default on mobile, open on desktop
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
