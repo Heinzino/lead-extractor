@@ -1,6 +1,26 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { supabaseAdmin } from '../../../lib/supabase/supabaseAdmin';
 import { stringify } from 'csv-stringify/sync';
+import dns from 'dns/promises';
+
+function isValidEmail(email: string): boolean {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return re.test(email);
+}
+
+async function checkMxRecords(domain: string): Promise<boolean> {
+  try {
+    const records = await dns.resolveMx(domain);
+    return Array.isArray(records) && records.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function verifyEmailFormat(email: string): Promise<boolean> {
+  if (!isValidEmail(email)) return false;
+  return true;
+}
 
 
 const CONFIG = {
@@ -83,10 +103,21 @@ Return nothing else.`.trim();
 }
 
 function generateFallbackPrompt(domain: string) {
-  const user = `For the company website ${domain}, please try to identify a contact email address found on the website. Please return a cleaned email address and nothing else.
+  const user = `For the company website ${domain}, please try to find a contact email address. Follow these steps:
+  1. Look for contact, about, or team pages on the website
+  2. Search for email patterns like contact@, info@, hello@, support@, or admin@
+  3. If multiple emails are found, choose the most general one (e.g., info@ over support@)
+  4. Return ONLY a clean email address if found, or "na" if no email is found
 
-If email is not found return na.`.trim();
-  const system = `The only thing that should ever be outputted is an email if it was found or "na".`.trim();
+Example outputs:
+- info@example.com
+- na`.trim();
+  
+  const system = `You are a helpful assistant that extracts contact emails from company websites. 
+  - Only return a single, clean email address or "na" if none found.
+  - Do not include any other text, explanations, or formatting.
+  - If the domain is invalid or the website is inaccessible, return "na".`.trim();
+  
   return { user, system };
 }
 
@@ -202,20 +233,39 @@ async function callPerplexity(user: string, system: string) {
 }
 
 async function callFindymail(name: string, domain: string) {
-  await waitForFindymailToken();
-  
-  const res = await fetch(FINDYMAIL_API_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${FINDYMAIL_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ name, domain }),
-  });
+  try {
+    await waitForFindymailToken();
+    
+    const res = await fetch(FINDYMAIL_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${FINDYMAIL_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ 
+        name: name.trim(),
+        domain: domain.trim(),
+        company: '' 
+      }),
+    });
 
-  if (!res.ok) return 'na';
-  const json = await res.json();
-  return json?.contact?.email || 'na';
+    if (!res.ok) {
+      console.error(`Findymail API error for ${name}@${domain}: ${res.status} ${res.statusText}`);
+      return 'na';
+    }
+    
+    const json = await res.json();
+    const email = json?.contact?.email || json?.email || json?.data?.email;
+    
+    if (email && typeof email === 'string' && email.includes('@') && email.includes('.')) {
+      return cleanEmail(email);
+    }
+    
+    return 'na';
+  } catch (error) {
+    console.error(`Error in callFindymail for ${name}@${domain}:`, error);
+    return 'na';
+  }
 }
 
 interface EnrichRow {
@@ -268,13 +318,25 @@ async function processRow(row: EnrichRow, jobTitle: string) {
 }
 
 const domainEmailCache = new Map<string, string>();
+const companyEmailCache = new Map<string, string>();
 
 async function enrichRow(row: EnrichRow) {
   const name = row['Found Person Name'];
   const domain = row['Normalized Domain'];
+  const company = row['company'].toLowerCase().trim();
   
   let personEmail = 'na';
   let websiteEmail = row['Website Email'] || 'na';
+  
+  if (company && companyEmailCache.has(company)) {
+    const cachedEmail = companyEmailCache.get(company)!;
+    return {
+      ...row,
+      'Person Email': personEmail,
+      'Website Email': cachedEmail,
+      'Final Email': cachedEmail,
+    };
+  }
   
   if (domain && domainEmailCache.has(domain)) {
     websiteEmail = domainEmailCache.get(domain)!;
@@ -284,24 +346,51 @@ async function enrichRow(row: EnrichRow) {
     personEmail = await callFindymail(name, domain);
   }
 
-  if ((!personEmail || personEmail.toLowerCase() === 'na') && 
-      (!websiteEmail || websiteEmail.toLowerCase() === 'na') &&
-      domain && !domainEmailCache.has(domain)) {
-
-    const fallback = generateFallbackPrompt(domain);
-    for (let i = 0; i < 3; i++) {
+  if ((!personEmail || personEmail.toLowerCase() === 'na') && domain) {
+    let fallbackSuccess = false;
+    
+    if (!websiteEmail || websiteEmail.toLowerCase() === 'na') {
+      const commonEmails = [
+        `info@${domain}`,
+        `contact@${domain}`,
+        `hello@${domain}`,
+        `support@${domain}`,
+        `admin@${domain}`,
+        `office@${domain}`
+      ];
+      
       try {
-        const fallbackResult = await callPerplexity(fallback.user, fallback.system);
-        if (fallbackResult.status === 'success' && 
-            fallbackResult.content.includes('@') && 
-            fallbackResult.content.includes('.')) {
-          websiteEmail = cleanEmail(fallbackResult.content);
+        await checkMxRecords(domain);
+      } catch {
+      }
+
+      for (const email of commonEmails) {
+        if (await verifyEmailFormat(email)) {
+          websiteEmail = email;
           domainEmailCache.set(domain, websiteEmail);
+          fallbackSuccess = true;
           break;
         }
-      } catch (error) {
-        console.error(`Error in fallback email lookup (attempt ${i + 1}):`, error);
-        await new Promise(r => setTimeout(r, 2 ** i * CONFIG.retryDelay));
+      }
+      
+      if (!fallbackSuccess) {
+        const fallback = generateFallbackPrompt(domain);
+        
+        for (let i = 0; i < 3; i++) {
+          try {
+            const fallbackResult = await callPerplexity(fallback.user, fallback.system);
+            if (fallbackResult.status === 'success' && 
+                fallbackResult.content.includes('@') && 
+                fallbackResult.content.includes('.')) {
+              websiteEmail = cleanEmail(fallbackResult.content);
+              domainEmailCache.set(domain, websiteEmail);
+              fallbackSuccess = true;
+              break;
+            }
+          } catch {
+            await new Promise(r => setTimeout(r, 2 ** i * CONFIG.retryDelay));
+          }
+        }
       }
     }
   } else if (websiteEmail && websiteEmail.toLowerCase() !== 'na') {
@@ -311,9 +400,21 @@ async function enrichRow(row: EnrichRow) {
 
   }
 
-  const finalWebsiteEmail = domain && domainEmailCache.has(domain) 
+  let finalWebsiteEmail = domain && domainEmailCache.has(domain) 
     ? domainEmailCache.get(domain)! 
     : websiteEmail;
+    
+  if ((!finalWebsiteEmail || finalWebsiteEmail.toLowerCase() === 'na') && domain) {
+    const fallbackEmail = `contact@${domain}`;
+    if (await verifyEmailFormat(fallbackEmail)) {
+      finalWebsiteEmail = fallbackEmail;
+      domainEmailCache.set(domain, finalWebsiteEmail);
+    }
+  }
+  
+  if (company && finalWebsiteEmail && finalWebsiteEmail.toLowerCase() !== 'na') {
+    companyEmailCache.set(company, finalWebsiteEmail);
+  }
     
   return {
     ...row,
