@@ -234,7 +234,16 @@ async function callPerplexity(user: string, system: string) {
 
 async function callFindymail(name: string, domain: string) {
   try {
+    console.log(`[Findymail] Starting lookup for ${name}@${domain}`);
     await waitForFindymailToken();
+    
+    const requestBody = { 
+      name: name.trim(),
+      domain: domain.trim(),
+      company: '' 
+    };
+    
+    console.log('[Findymail] Request body:', JSON.stringify(requestBody, null, 2));
     
     const res = await fetch(FINDYMAIL_API_URL, {
       method: 'POST',
@@ -242,28 +251,70 @@ async function callFindymail(name: string, domain: string) {
         'Authorization': `Bearer ${FINDYMAIL_API_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ 
-        name: name.trim(),
-        domain: domain.trim(),
-        company: '' 
-      }),
+      body: JSON.stringify(requestBody),
     });
 
+    const responseText = await res.text();
+    console.log(`[Findymail] Response status: ${res.status} ${res.statusText}`);
+    console.log('[Findymail] Response body:', responseText);
+
     if (!res.ok) {
-      console.error(`Findymail API error for ${name}@${domain}: ${res.status} ${res.statusText}`);
+      console.error(`[Findymail] API error for ${name}@${domain}: ${res.status} ${res.statusText} - ${responseText}`);
       return 'na';
     }
     
-    const json = await res.json();
-    const email = json?.contact?.email || json?.email || json?.data?.email;
-    
-    if (email && typeof email === 'string' && email.includes('@') && email.includes('.')) {
-      return cleanEmail(email);
+    let json;
+    try {
+      json = JSON.parse(responseText);
+      console.log('[Findymail] Parsed JSON response:', JSON.stringify(json, null, 2));
+    } catch (e) {
+      console.error('[Findymail] Failed to parse JSON response:', e);
+      console.error('[Findymail] Raw response that failed to parse:', responseText);
+      return 'na';
     }
+    
+    // Check if we have a contact object and handle the response
+    if (json.contact) {
+      console.log(`[Findymail] Contact found with ID: ${json.contact.id}`);
+      
+      // Check if email is explicitly null or empty
+      if (json.contact.email === null || json.contact.email === '') {
+        console.log('[Findymail] No email found for this contact');
+        return 'na';
+      }
+      
+      // If there is an email, clean and return it
+      if (json.contact.email && typeof json.contact.email === 'string') {
+        const cleanedEmail = cleanEmail(json.contact.email);
+        if (cleanedEmail.includes('@') && cleanedEmail.includes('.')) {
+          console.log(`[Findymail] Found email: ${cleanedEmail}`);
+          return cleanedEmail;
+        }
+      }
+    }
+    
+    // Fallback to other possible response formats
+    const email = json?.contact?.email || json?.email || json?.data?.email;
+    if (email && typeof email === 'string' && email.includes('@') && email.includes('.')) {
+      const cleanedEmail = cleanEmail(email);
+      console.log(`[Findymail] Found email (fallback): ${cleanedEmail}`);
+      return cleanedEmail;
+    }
+    
+    console.log(`[Findymail] No valid email found in response for ${name}@${domain}`);
+    console.log('[Findymail] Response summary:', {
+      hasContactObject: !!json.contact,
+      contactId: json.contact?.id,
+      emailInResponse: json.contact?.email,
+      responseKeys: Object.keys(json)
+    });
     
     return 'na';
   } catch (error) {
-    console.error(`Error in callFindymail for ${name}@${domain}:`, error);
+    console.error(`[Findymail] Unexpected error for ${name}@${domain}:`, error);
+    if (error instanceof Error) {
+      console.error('[Findymail] Error stack:', error.stack);
+    }
     return 'na';
   }
 }
@@ -320,13 +371,25 @@ async function processRow(row: EnrichRow, jobTitle: string) {
 const domainEmailCache = new Map<string, string>();
 const companyEmailCache = new Map<string, string>();
 
+// Helper function to get header value case-insensitively
+function getHeaderCaseInsensitive<T extends Record<string, unknown>>(
+  obj: T, 
+  header: string
+): string | undefined {
+  const lowerHeader = header.toLowerCase();
+  const key = Object.keys(obj).find(k => k.toLowerCase() === lowerHeader);
+  const value = key ? obj[key] : undefined;
+  return typeof value === 'string' ? value : undefined;
+}
+
 async function enrichRow(row: EnrichRow) {
-  const name = row['Found Person Name'];
-  const domain = row['Normalized Domain'];
-  const company = row['company'].toLowerCase().trim();
+  // Using the case-insensitive helper for all header accesses
+  const name = getHeaderCaseInsensitive(row, 'Found Person Name') || '';
+  const domain = getHeaderCaseInsensitive(row, 'Normalized Domain') || '';
+  const company = (getHeaderCaseInsensitive(row, 'company') || '').toLowerCase().trim();
   
   let personEmail = 'na';
-  let websiteEmail = row['Website Email'] || 'na';
+  let websiteEmail = getHeaderCaseInsensitive(row, 'Website Email') || 'na';
   
   if (company && companyEmailCache.has(company)) {
     const cachedEmail = companyEmailCache.get(company)!;
