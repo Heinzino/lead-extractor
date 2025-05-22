@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 
 interface ToastProps {
   message: string;
@@ -8,6 +8,14 @@ interface ToastProps {
 
 export default function Toast({ message, type = 'error', onClose }: ToastProps) {
   const bgColor = type === 'error' ? 'bg-red-500' : 'bg-green-500';
+  
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      onClose();
+    }, 3000);
+    
+    return () => clearTimeout(timer);
+  }, [onClose]);
   
   return (
     <div className="fixed top-4 right-4 z-50">
