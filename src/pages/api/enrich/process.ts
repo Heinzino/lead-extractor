@@ -54,9 +54,10 @@ const PPLX_MODEL = 'sonar-pro';
 const PPLX_COST_PER_1K_TOKENS = 0.002;
 
 
-function normalizeDomain(url: string): string {
+function normalizeDomain(url?: string | null): string {
+  if (!url) return '';
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(url.startsWith('http') ? url : `https://${url}`);
     return parsed.hostname.replace('www.', '');
   } catch {
     return url.replace('www.', '');
@@ -335,8 +336,10 @@ interface EnrichRow {
 }
 
 async function processRow(row: EnrichRow, jobTitle: string) {
-  const domain = normalizeDomain(row['website']);
-  const { user, system } = generatePrompt(row['company'], domain, jobTitle);
+  const website = getHeaderCaseInsensitive(row, 'website') || '';
+  const company = getHeaderCaseInsensitive(row, 'company') || '';
+  const domain = normalizeDomain(website);
+  const { user, system } = generatePrompt(company, domain, jobTitle);
 
   let content = 'na';
   let cost = 0;
@@ -388,7 +391,7 @@ async function enrichRow(row: EnrichRow) {
   const domain = getHeaderCaseInsensitive(row, 'Normalized Domain') || '';
   const company = (getHeaderCaseInsensitive(row, 'company') || '').toLowerCase().trim();
   
-  let personEmail = 'na';
+  let personEmail = getHeaderCaseInsensitive(row, 'Person Email') || 'na';
   let websiteEmail = getHeaderCaseInsensitive(row, 'Website Email') || 'na';
   
   if (company && companyEmailCache.has(company)) {
@@ -479,11 +482,13 @@ async function enrichRow(row: EnrichRow) {
     companyEmailCache.set(company, finalWebsiteEmail);
   }
     
+  const finalEmail = personEmail !== 'na' ? personEmail : finalWebsiteEmail;
+  
   return {
     ...row,
     'Person Email': personEmail,
     'Website Email': finalWebsiteEmail,
-    'Final Email': personEmail !== 'na' ? personEmail : finalWebsiteEmail,
+    'Final Email': finalEmail,
   };
 }
 

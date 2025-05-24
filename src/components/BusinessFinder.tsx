@@ -197,14 +197,19 @@ export default function BusinessFinder() {
           return field;
         };
 
-        const cleanField = (field: string): string => {
+        // Clean fields while preserving leading zeros in zipcodes
+        const cleanField = (field: string, isZipcode: boolean = false): string => {
+          if (isZipcode) {
+            // Remove quotes but don't trim whitespace to preserve leading zeros
+            return field.replace(/^["']|["']$/g, '');
+          }
           return field.replace(/^["']|["']$/g, '').trim();
         };
 
         const cleanedQuery = cleanField(row.query);
         const cleanedCity = cleanField(row.city);
         const cleanedState = cleanField(row.state);
-        const cleanedZip = cleanField(row.zip);
+        const cleanedZip = cleanField(row.zip, true); // Preserve leading zeros for zip
 
         return [
           escapeCsv(cleanedQuery),
