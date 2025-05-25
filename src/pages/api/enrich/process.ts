@@ -104,20 +104,52 @@ Return nothing else.`.trim();
 }
 
 function generateFallbackPrompt(domain: string) {
-  const user = `For the company website ${domain}, please try to find a contact email address. Follow these steps:
-  1. Look for contact, about, or team pages on the website
-  2. Search for email patterns like contact@, info@, hello@, support@, or admin@
-  3. If multiple emails are found, choose the most general one (e.g., info@ over support@)
-  4. Return ONLY a clean email address if found, or "na" if no email is found
+  const isFacebook = domain.includes('facebook.com');
+  
+  let user = `For the company website ${domain}, please find a professional contact email address. `;
+  
+  if (isFacebook) {
+    user += `Since this is a Facebook page, please follow these steps carefully:
+    1. Look for the 'About' section in the left sidebar and click on it
+    2. Check for a 'Contact Info' or 'See contact info' button and click it
+    3. In the contact information section, look for:
+       - Email addresses under 'Contact Information' or 'Business Contact'
+       - The 'More Info' section for additional contact details
+       - Any 'Send Email' or 'Contact Us' buttons
+    4. Check the page's posts for any contact information or announcements
+    5. Look for a 'Page Transparency' section which might contain business email
+    6. Check the 'Services' or 'Products' tabs if available
+    7. Look for a website link that might contain a contact page
+    `;
+  } else {
+    user += `Follow these steps:
+    1. Look for contact, about, team, or company pages
+    2. Check the website footer and header for contact links
+    3. Search for email patterns like contact@, info@, hello@, support@, admin@, or firstname@
+    4. Look for a contact form that might reveal an email address
+    `;
+  }
+  
+  user += `
+  5. If multiple emails are found, prioritize in this order:
+     - info@, contact@, hello@ (most general)
+     - support@, help@ (customer service)
+     - First name based emails (e.g., john@, jane@)
+  6. Verify the email format is valid (contains @ and a valid domain)
+  7. Return ONLY a clean email address if found, or "na" if no email is found
 
 Example outputs:
 - info@example.com
 - na`.trim();
   
-  const system = `You are a helpful assistant that extracts contact emails from company websites. 
-  - Only return a single, clean email address or "na" if none found.
-  - Do not include any other text, explanations, or formatting.
-  - If the domain is invalid or the website is inaccessible, return "na".`.trim();
+  const system = `You are a professional email extraction assistant. Follow these rules STRICTLY:
+  - For Facebook pages: Thoroughly check all sections including About, Contact Info, and Page Transparency
+  - For other websites: Systematically check all pages and sections where contact info might appear
+  - Only return a single, clean email address or "na" if none found
+  - Do not include any other text, explanations, or formatting
+  - If the domain is invalid, inaccessible, or no email is found, return "na"
+  - Skip personal emails (e.g., gmail.com, yahoo.com) unless no business email is found
+  - If multiple emails are found, return the most appropriate business email`.trim();
   
   return { user, system };
 }
@@ -274,17 +306,14 @@ async function callFindymail(name: string, domain: string) {
       return 'na';
     }
     
-    // Check if we have a contact object and handle the response
     if (json.contact) {
       console.log(`[Findymail] Contact found with ID: ${json.contact.id}`);
       
-      // Check if email is explicitly null or empty
       if (json.contact.email === null || json.contact.email === '') {
         console.log('[Findymail] No email found for this contact');
         return 'na';
       }
       
-      // If there is an email, clean and return it
       if (json.contact.email && typeof json.contact.email === 'string') {
         const cleanedEmail = cleanEmail(json.contact.email);
         if (cleanedEmail.includes('@') && cleanedEmail.includes('.')) {
@@ -294,7 +323,6 @@ async function callFindymail(name: string, domain: string) {
       }
     }
     
-    // Fallback to other possible response formats
     const email = json?.contact?.email || json?.email || json?.data?.email;
     if (email && typeof email === 'string' && email.includes('@') && email.includes('.')) {
       const cleanedEmail = cleanEmail(email);
@@ -374,7 +402,6 @@ async function processRow(row: EnrichRow, jobTitle: string) {
 const domainEmailCache = new Map<string, string>();
 const companyEmailCache = new Map<string, string>();
 
-// Helper function to get header value case-insensitively
 function getHeaderCaseInsensitive<T extends Record<string, unknown>>(
   obj: T, 
   header: string
@@ -386,7 +413,6 @@ function getHeaderCaseInsensitive<T extends Record<string, unknown>>(
 }
 
 async function enrichRow(row: EnrichRow) {
-  // Using the case-insensitive helper for all header accesses
   const name = getHeaderCaseInsensitive(row, 'Found Person Name') || '';
   const domain = getHeaderCaseInsensitive(row, 'Normalized Domain') || '';
   const company = (getHeaderCaseInsensitive(row, 'company') || '').toLowerCase().trim();
@@ -459,27 +485,40 @@ async function enrichRow(row: EnrichRow) {
         }
       }
     }
-  } else if (websiteEmail && websiteEmail.toLowerCase() !== 'na') {
-    if (domain && !domainEmailCache.has(domain)) {
-      domainEmailCache.set(domain, websiteEmail);
-    }
-
   }
 
-  let finalWebsiteEmail = domain && domainEmailCache.has(domain) 
-    ? domainEmailCache.get(domain)! 
-    : websiteEmail;
+  const isAutoGeneratedEmail = (email: string, domain: string): boolean => {
+    if (!email || email.toLowerCase() === 'na') return false;
     
-  if ((!finalWebsiteEmail || finalWebsiteEmail.toLowerCase() === 'na') && domain) {
-    const fallbackEmail = `contact@${domain}`;
-    if (await verifyEmailFormat(fallbackEmail)) {
-      finalWebsiteEmail = fallbackEmail;
-      domainEmailCache.set(domain, finalWebsiteEmail);
+    const commonPrefixes = ['info@', 'contact@', 'hello@', 'support@', 'admin@', 'office@'];
+    return commonPrefixes.some(prefix => 
+      email.toLowerCase().startsWith(prefix) && 
+      email.toLowerCase().endsWith(`@${domain.toLowerCase()}`)
+    );
+  };
+
+  let finalWebsiteEmail = 'na';
+  
+  if (domain && websiteEmail && websiteEmail.toLowerCase() !== 'na') {
+    const autoGenerated = isAutoGeneratedEmail(websiteEmail, domain);
+    
+    if (!autoGenerated) {
+      finalWebsiteEmail = websiteEmail;
+    } else if (domainEmailCache.has(domain)) {
+      const cachedEmail = domainEmailCache.get(domain)!;
+      if (!isAutoGeneratedEmail(cachedEmail, domain)) {
+        finalWebsiteEmail = cachedEmail;
+      }
     }
   }
   
-  if (company && finalWebsiteEmail && finalWebsiteEmail.toLowerCase() !== 'na') {
-    companyEmailCache.set(company, finalWebsiteEmail);
+  if (finalWebsiteEmail !== 'na' && domain) {
+    if (!isAutoGeneratedEmail(finalWebsiteEmail, domain)) {
+      domainEmailCache.set(domain, finalWebsiteEmail);
+      if (company) {
+        companyEmailCache.set(company, finalWebsiteEmail);
+      }
+    }
   }
     
   const finalEmail = personEmail !== 'na' ? personEmail : finalWebsiteEmail;
@@ -531,7 +570,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       uniqueNameResults.map((row: EnrichRow) => enrichRow(row))
     );
 
-    const output = stringify(enrichedResults, { header: true });
+    const seenEmails = new Set<string>();
+    const deduplicatedResults = enrichedResults.filter(row => {
+      const email = String(row['Final Email']).toLowerCase();
+      if (email === 'na' || seenEmails.has(email)) {
+        return false;
+      }
+      seenEmails.add(email);
+      return true;
+    });
+
+    const output = stringify(deduplicatedResults, { header: true });
     const fileName = `enrich-results/${resultId}.csv`;
 
     const { data: buckets } = await supabaseAdmin.storage.listBuckets();
