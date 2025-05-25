@@ -1,26 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { supabaseAdmin } from '../../../lib/supabase/supabaseAdmin';
 import { stringify } from 'csv-stringify/sync';
-import dns from 'dns/promises';
-
-function isValidEmail(email: string): boolean {
-  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return re.test(email);
-}
-
-async function checkMxRecords(domain: string): Promise<boolean> {
-  try {
-    const records = await dns.resolveMx(domain);
-    return Array.isArray(records) && records.length > 0;
-  } catch {
-    return false;
-  }
-}
-
-async function verifyEmailFormat(email: string): Promise<boolean> {
-  if (!isValidEmail(email)) return false;
-  return true;
-}
 
 
 const CONFIG = {

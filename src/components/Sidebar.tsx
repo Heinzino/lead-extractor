@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Search, Briefcase, Phone, Settings, ChevronsLeft, Menu } from 'lucide-react';
+import Image from 'next/image';
 
 const sidebarItems = [
   { title: 'Results', icon: <Search size={24} /> },
@@ -48,7 +49,7 @@ export default function Sidebar({ activePage, setActivePage }: { activePage: str
         <div className={`flex flex-col w-full p-6 h-full`}>
           <div className="flex items-center justify-between">
             <div className='flex items-center gap-4'>
-              <img src="/Risorsa_7c.svg" alt="Logo" className="w-8 h-8" />
+              <Image src="/Risorsa_7c.svg" alt="Logo" width={32} height={32} className="w-8 h-8" />
               <h1 className="text-2xl font-bold">Lead Extractor</h1>
             </div>
             <button
