@@ -652,7 +652,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .update({
         status: 'DONE',
         file_url: data.signedUrl,
-        result_count: enrichedResults.length,
+        result_count: deduplicatedResults.length,
         updated_at: new Date().toISOString()
       })
       .eq('id', resultId as string);
