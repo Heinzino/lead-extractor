@@ -103,12 +103,12 @@ export default function FileUploaderBox({
             onValidationError(validation.message);
           }
         }
-      }, [handleFileUpload, type, onValidationError]);
+      }, [handleFileUpload, type, onValidationError, validateFile]);
     
     const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();
         if (!isDragging) setIsDragging(true);
-      }, [isDragging]);
+      }, [isDragging, validateFile]);
       
     const handleDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();
@@ -132,7 +132,7 @@ export default function FileUploaderBox({
             onValidationError(validation.message);
           }
         }
-      }, [handleFileUpload, type, onValidationError]);
+      }, [handleFileUpload, type, onValidationError, validateFile]);
 
     const getTitle = () => {
       switch(type) {
