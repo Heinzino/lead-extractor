@@ -72,76 +72,25 @@ function cleanEmail(email: string): string {
 }
 
 function generatePrompt(company: string, domain: string, jobTitle: string) {
-  const user = `I need to find the person who holds the job title: ${jobTitle} at company: ${company} which has website: ${domain}. 
+  const user = `Hello, can you help me find the person who holds the jobtitle: ${jobTitle} at company: ${company} which has website: ${domain}?
 
-IMPORTANT RULES:
-1. Only return a full name if you can see it explicitly listed on their website with this exact job title
-2. Do NOT guess or make up names under any circumstances
-3. If the name is not clearly visible on their website with this job title, return "na"
-4. Do not return partial names or initials
-5. If you're not 100% certain, return "na"
-
-Please check their team page, about page, and leadership page if available.`.trim();
+IMPORTANT: 
+Only return a person's full name if you are at least 95% confident that the individual actually holds the job title requested. 
+If you cannot confidently verify this match, return "na" instead.`;
   
-  const system = `You are a careful research assistant. Your task is to find the name of a person with a specific job title at a company.
-
-RULES:
-- Return ONLY the full name if you can see it on their website with the exact job title
-- If you can't find the name with 100% certainty, return 'na'
-- Never guess or make up names
-- Never return partial names or initials
-- If in doubt, return 'na'`;
+  const system = `Please return ONLY the full name of the person matching the requested job title if you are at least 95% confident they hold it. 
+If you are not 95% confident, return 'na'. 
+Return nothing else.`;
 
   return { user, system };
 }
 
 function generateFallbackPrompt(domain: string) {
-  const isFacebook = domain.includes('facebook.com');
-  
-  let user = `For the company website ${domain}, please find a professional contact email address. `;
-  
-  if (isFacebook) {
-    user += `Since this is a Facebook page, please follow these steps carefully:
-    1. Look for the 'About' section in the left sidebar and click on it
-    2. Check for a 'Contact Info' or 'See contact info' button and click it
-    3. In the contact information section, look for:
-       - Email addresses under 'Contact Information' or 'Business Contact'
-       - The 'More Info' section for additional contact details
-       - Any 'Send Email' or 'Contact Us' buttons
-    4. Check the page's posts for any contact information or announcements
-    5. Look for a 'Page Transparency' section which might contain business email
-    6. Check the 'Services' or 'Products' tabs if available
-    7. Look for a website link that might contain a contact page
-    `;
-  } else {
-    user += `Follow these steps:
-    1. Look for contact, about, team, or company pages
-    2. Check the website footer and header for contact links
-    3. Search for email patterns like contact@, info@, hello@, support@, admin@, or firstname@
-    4. Look for a contact form that might reveal an email address
-    `;
-  }
-  
-  user += `
-  5. If multiple emails are found, prioritize in this order:
-     - info@, contact@, hello@ (most general)
-     - support@, help@ (customer service)
-     - First name based emails (e.g., john@, jane@)
-  6. Verify the email format is valid (contains @ and a valid domain)
-  7. Return ONLY a clean email address if found, or "na" if no email is found
+  const user = `For the company website ${domain}, please try to identify a contact email address found on the website. Please return a cleaned email address and nothing else.
 
-Example outputs:
-- info@example.com
-- na`.trim();
+If email is not found return na.`;
   
-  const system = `You are a professional email extraction assistant. Follow these rules STRICTLY:
-  - For Facebook pages: Thoroughly check all sections including About, Contact Info, and Page Transparency
-  - For other websites: Systematically check all pages and sections where contact info might appear
-  - Only return a single, clean email address or "na" if none found
-  - Do not include any other text, explanations, or formatting
-  - If the domain is invalid, inaccessible, or no email is found, return "na"
-  - Skip personal emails (e.g., gmail.com, yahoo.com) unless no business email is found
-  - If multiple emails are found, return the most appropriate business email`.trim();
+  const system = `The only thing that should ever be outputted is an email if it was found or "na".`;
   
   return { user, system };
 }
@@ -225,8 +174,6 @@ async function callPerplexity(user: string, system: string) {
         content: user + '\n\nIMPORTANT: Respond with ONLY the full name or "na". Do not include any explanations, notes, or additional text.'
       },
     ],
-    temperature: 0.3, 
-    max_tokens: 50,
   };
 
   try {
@@ -259,16 +206,12 @@ async function callPerplexity(user: string, system: string) {
 
 async function callFindymail(name: string, domain: string) {
   try {
-    console.log(`[Findymail] Starting lookup for ${name}@${domain}`);
     await waitForFindymailToken();
     
     const requestBody = { 
       name: name.trim(),
-      domain: domain.trim(),
-      company: '' 
+      domain: domain.trim()
     };
-    
-    console.log('[Findymail] Request body:', JSON.stringify(requestBody, null, 2));
     
     const res = await fetch(FINDYMAIL_API_URL, {
       method: 'POST',
@@ -279,63 +222,14 @@ async function callFindymail(name: string, domain: string) {
       body: JSON.stringify(requestBody),
     });
 
-    const responseText = await res.text();
-    console.log(`[Findymail] Response status: ${res.status} ${res.statusText}`);
-    console.log('[Findymail] Response body:', responseText);
-
     if (!res.ok) {
-      console.error(`[Findymail] API error for ${name}@${domain}: ${res.status} ${res.statusText} - ${responseText}`);
       return 'na';
     }
     
-    let json;
-    try {
-      json = JSON.parse(responseText);
-      console.log('[Findymail] Parsed JSON response:', JSON.stringify(json, null, 2));
-    } catch (e) {
-      console.error('[Findymail] Failed to parse JSON response:', e);
-      console.error('[Findymail] Raw response that failed to parse:', responseText);
-      return 'na';
-    }
+    const json = await res.json();
+    return json?.contact?.email || 'na';
     
-    if (json.contact) {
-      console.log(`[Findymail] Contact found with ID: ${json.contact.id}`);
-      
-      if (json.contact.email === null || json.contact.email === '') {
-        console.log('[Findymail] No email found for this contact');
-        return 'na';
-      }
-      
-      if (json.contact.email && typeof json.contact.email === 'string') {
-        const cleanedEmail = cleanEmail(json.contact.email);
-        if (cleanedEmail.includes('@') && cleanedEmail.includes('.')) {
-          console.log(`[Findymail] Found email: ${cleanedEmail}`);
-          return cleanedEmail;
-        }
-      }
-    }
-    
-    const email = json?.contact?.email || json?.email || json?.data?.email;
-    if (email && typeof email === 'string' && email.includes('@') && email.includes('.')) {
-      const cleanedEmail = cleanEmail(email);
-      console.log(`[Findymail] Found email (fallback): ${cleanedEmail}`);
-      return cleanedEmail;
-    }
-    
-    console.log(`[Findymail] No valid email found in response for ${name}@${domain}`);
-    console.log('[Findymail] Response summary:', {
-      hasContactObject: !!json.contact,
-      contactId: json.contact?.id,
-      emailInResponse: json.contact?.email,
-      responseKeys: Object.keys(json)
-    });
-    
-    return 'na';
-  } catch (error) {
-    console.error(`[Findymail] Unexpected error for ${name}@${domain}:`, error);
-    if (error instanceof Error) {
-      console.error('[Findymail] Error stack:', error.stack);
-    }
+  } catch {
     return 'na';
   }
 }
