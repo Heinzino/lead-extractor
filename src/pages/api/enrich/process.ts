@@ -45,29 +45,30 @@ function normalizeDomain(url?: string | null): string {
 }
 
 function cleanName(name: string): string {
-  let cleaned = name
-    .replace(/\[\d+\]/g, '')
-    .replace(/\[.*?\]/g, '')
-    .trim();
+  if (!name) return 'na';
+  
+  let cleaned = name.replace(/\[\d+\]/g, '')
+    .replace(/\[.*?\]/g, '');
 
-  const prefixes = /(?:^|\s)(?:Dr\.?|Mr\.?|Mrs\.?|Ms\.?|Miss|Prof\.?|Professor)(?=\s|$)/gi;
-  cleaned = cleaned.replace(prefixes, '').trim();
+  const prefixes = /(?:^|\s)(?:Dr\.?\s*|Mr\.?\s*|Mrs\.?\s*|Ms\.?\s*|Miss\s*|Prof\.?\s*|Professor\s*|Rev\.?\s*|Fr\.?\s*|Sr\.?\s*|Srta\.?\s*|Sra\.?\s*)(?=\S)/gi;
+  cleaned = cleaned.replace(prefixes, '');
 
-  const suffixes = /\s(?:PhD|MBA|MD|JD|DDS|DMD|DO|RN|NP|PA|Jr\.?|Sr\.?|Esq\.?|I{2,3}|IV|V)(?=\s|$)/gi;
-  cleaned = cleaned.replace(suffixes, '').trim();
+  const suffixes = /\s(?:PhD|MBA|MD|JD|DDS|DMD|DO|RN|NP|PA|APRN|FNP|DNP|DPM|DC|OD|DVM|DSc|EdD|DMin|PsyD|Jr\.?|Sr\.?|I{1,3}|IV|V|VI|VII|VIII|IX|X)(?=\s|$)/gi;
+  cleaned = cleaned.replace(suffixes, '');
 
-  cleaned = cleaned
-    .replace(/\s+/, ' ')
-    .replace(/\s*[,\.]+\s*/g, ' ')
-    .trim();
-
-  return cleaned;
+  return cleaned
+    .trim()
+    .replace(/^[.,;:]+/, '')
+    .replace(/[.,;:]+$/, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim() || 'na';
 }
 
 function cleanEmail(email: string): string {
-  return email
-    .replace(/\[.*?\]/g, '')
+  if (!email) return 'na';
+  return email.replace(/\[.*?\]/g, '')
     .trim()
+    .replace(/^[.,]+/, '')
     .replace(/[.,]+$/, '');
 }
 
@@ -257,36 +258,35 @@ async function processRow(row: EnrichRow, jobTitle: string) {
 
   let content = 'na';
   let cost = 0;
-  let status = 'error';
   let attempts = 0;
 
-  for (let i = 0; i < CONFIG.maxRetries; i++) {
+  for (let i = 0; i < 5; i++) {
     try {
       const result = await callPerplexity(user, system);
       content = result.content;
       cost = result.cost;
-      status = result.status;
-      break;
+      if (content && content.toLowerCase() !== 'na') {
+        break;
+      }
     } catch {
-      await new Promise(r => setTimeout(r, 2 ** i * CONFIG.retryDelay));
+      await new Promise(r => setTimeout(r, 2 ** i * 1000));
     }
     attempts++;
   }
 
-  const names = content.toLowerCase() === 'na' ? ['na'] : cleanName(content).split(',').map(n => n.trim());
+  const names = content.toLowerCase() === 'na' ? ['na'] : 
+    cleanName(content).split(',').map(n => n.trim()).filter(n => n && n.toLowerCase() !== 'na');
+
   return names.map(name => ({
     ...row,
     'Normalized Domain': domain,
     'Desired Job Title': jobTitle,
     'Found Person Name': name,
     'Total Cost': cost.toFixed(6),
-    'Annotation': status,
+    'Annotation': 'success',
     'Attempts': attempts + 1,
   }));
 }
-
-const domainEmailCache = new Map<string, string>();
-const companyEmailCache = new Map<string, string>();
 
 function getHeaderCaseInsensitive<T extends Record<string, unknown>>(
   obj: T, 
@@ -301,33 +301,12 @@ function getHeaderCaseInsensitive<T extends Record<string, unknown>>(
 async function enrichRow(row: EnrichRow) {
   const name = getHeaderCaseInsensitive(row, 'Found Person Name') || '';
   const domain = getHeaderCaseInsensitive(row, 'Normalized Domain') || '';
-  const company = (getHeaderCaseInsensitive(row, 'company') || '').toLowerCase().trim();
   
-  let personEmail = getHeaderCaseInsensitive(row, 'Person Email') || 'na';
-  let websiteEmail = getHeaderCaseInsensitive(row, 'Website Email') || 'na';
-  
-  if (company && companyEmailCache.has(company)) {
-    const cachedEmail = companyEmailCache.get(company)!;
-    return {
-      ...row,
-      'Person Email': personEmail,
-      'Website Email': cachedEmail,
-      'Final Email': cachedEmail,
-    };
-  }
-  
-  if (domain && domainEmailCache.has(domain)) {
-    websiteEmail = domainEmailCache.get(domain)!;
-  }
+  const personEmail = name.toLowerCase() !== 'na' ? await callFindymail(name, domain) : 'na';
+  let websiteEmail = 'na';
 
-  if (name.toLowerCase() !== 'na') {
-    personEmail = await callFindymail(name, domain);
-  }
-
-  // Only use Perplexity fallback if no email from Findymail and domain is available
-  if ((!personEmail || personEmail.toLowerCase() === 'na') && domain) {
+  if (!personEmail || personEmail.toLowerCase() === 'na') {
     const fallback = generateFallbackPrompt(domain);
-    
     for (let i = 0; i < 3; i++) {
       try {
         const fallbackResult = await callPerplexity(fallback.user, fallback.system);
@@ -335,37 +314,21 @@ async function enrichRow(row: EnrichRow) {
             fallbackResult.content.includes('@') && 
             fallbackResult.content.includes('.')) {
           websiteEmail = cleanEmail(fallbackResult.content);
-          domainEmailCache.set(domain, websiteEmail);
           break;
         }
       } catch {
-        await new Promise(r => setTimeout(r, 2 ** i * CONFIG.retryDelay));
+        await new Promise(r => setTimeout(r, 2 ** i * 1000)); 
       }
     }
   }
 
-  // We'll accept any website email that's found, including common ones like info@, contact@, etc.
-  let finalWebsiteEmail = 'na';
-  
-  if (domain && websiteEmail && websiteEmail.toLowerCase() !== 'na') {
-    finalWebsiteEmail = websiteEmail;
-    
-    // Update caches
-    if (domain) {
-      domainEmailCache.set(domain, finalWebsiteEmail);
-      if (company) {
-        companyEmailCache.set(company, finalWebsiteEmail);
-      }
-    }
-  }
-    
-  const finalEmail = personEmail !== 'na' ? personEmail : finalWebsiteEmail;
+  const finalEmail = (personEmail && personEmail.toLowerCase() !== 'na') ? personEmail : websiteEmail;
   
   return {
     ...row,
     'Person Email': personEmail,
-    'Website Email': finalWebsiteEmail,
-    'Final Email': finalEmail,
+    'Website Email': websiteEmail,
+    'Final Email': finalEmail
   };
 }
 
@@ -396,32 +359,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const nameResults = await Promise.all(
       expandedRows.map((row: EnrichRow) => processRow(row, row['Desired Job Title']))
     );
-    const flattenedNameResults = nameResults.flat();
+    
+    const processedNameResults = [];
+    for (let i = 0; i < expandedRows.length; i++) {
+      const result = nameResults[i];
+      if (Array.isArray(result)) {
+        processedNameResults.push(...result);
+      } else if (result) {
+        processedNameResults.push(result);
+      }
+    }
 
-    const uniqueNameResults = flattenedNameResults
-      .filter(row => String(row['Found Person Name']).toLowerCase() !== 'na')
-      .filter((row, index, self) => 
-        index === self.findIndex(r => r['Found Person Name'] === row['Found Person Name'])
-      );
+    const uniqueNameResults = processedNameResults
+      .filter(row => String(row['Found Person Name']).toLowerCase() !== 'na');
 
     const enrichedResults = await Promise.all(
       uniqueNameResults.map((row: EnrichRow) => enrichRow(row))
     );
 
     const seenEmails = new Set<string>();
-    const deduplicatedResults = enrichedResults.filter(row => {
+    const deduplicatedResults = [];
+    
+    for (const row of enrichedResults) {
       const email = String(row['Final Email']).toLowerCase();
-      if (email === 'na' || seenEmails.has(email)) {
-        return false;
+      if (email !== 'na' && !seenEmails.has(email)) {
+        seenEmails.add(email);
+        deduplicatedResults.push(row);
       }
-      seenEmails.add(email);
-      return true;
-    });
+    }
 
     let fileUrl: string | undefined;
     
-    // Only create and upload file if we have results
-    if (deduplicatedResults.length > 0) {
+    if (deduplicatedResults && deduplicatedResults.length > 0) {
       const output = stringify(deduplicatedResults, { header: true });
       const fileName = `enrich-results/${resultId}.csv`;
 
@@ -483,7 +452,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       if (!userError && userData) {
         const currentTokens = userData.user_tokens || 0;
-        const newTokens = currentTokens - enrichedResults.length;
+        const newTokens = currentTokens - (deduplicatedResults?.length || 0);
 
         await supabaseAdmin
           .from('users')
@@ -516,9 +485,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           error_message: error instanceof Error ? error.message : 'Unknown error',
           updated_at: new Date().toISOString()
         })
-        .eq('id', resultId);
+        .eq('id', resultId as string);
     }
 
-    return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    return res.status(500).json({ 
+      error: error instanceof Error ? error.message : 'Unknown error' 
+    });
   }
 } 
