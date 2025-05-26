@@ -167,11 +167,11 @@ async function callPerplexity(user: string, system: string) {
     messages: [
       { 
         role: 'system', 
-        content: system + '\n\nIMPORTANT: Respond with ONLY the full name or "na". Do not include any explanations, notes, or additional text.' 
+        content: system 
       },
       { 
         role: 'user', 
-        content: user + '\n\nIMPORTANT: Respond with ONLY the full name or "na". Do not include any explanations, notes, or additional text.'
+        content: user 
       },
     ],
   };
