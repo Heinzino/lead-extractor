@@ -578,10 +578,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
 
     let fileUrl: string | undefined;
+    let fileSize: number | undefined;
     
+    const updateData: {
+      status: string;
+      file_url?: string;
+      result_count: number;
+      file_size?: number;
+      updated_at: string;
+    } = {
+      status: 'DONE',
+      result_count: deduplicatedResults.length,
+      updated_at: new Date().toISOString()
+    };
+
     if (deduplicatedResults.length > 0) {
       const output = stringify(deduplicatedResults, { header: true });
       const fileName = `enrich-results/${resultId}.csv`;
+      fileSize = new TextEncoder().encode(output).length;
 
       const { data: buckets } = await supabaseAdmin.storage.listBuckets();
       const bucketExists = buckets?.some(b => b.name === 'enrich-results');
@@ -624,6 +638,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
       
       fileUrl = data.signedUrl;
+      updateData.file_url = fileUrl;
+      updateData.file_size = fileSize;
     }
 
     const { data: enrichResult, error: fetchUserError } = await supabaseAdmin
@@ -654,12 +670,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     
     const { error: updateError } = await supabaseAdmin
       .from('enrich_results')
-      .update({
-        status: 'DONE',
-        file_url: fileUrl,
-        result_count: deduplicatedResults.length,
-        updated_at: new Date().toISOString()
-      })
+      .update(updateData)
       .eq('id', resultId as string);
 
     if (updateError) {

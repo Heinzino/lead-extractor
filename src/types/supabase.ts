@@ -65,6 +65,7 @@ export type Database = {
           error_message?: string
           file_url?: string
           result_count?: number
+          file_size?: number
           created_at: string
           updated_at: string
         }
@@ -75,6 +76,7 @@ export type Database = {
           error_message?: string
           file_url?: string
           result_count?: number
+          file_size?: number
           created_at?: string
           updated_at?: string
         }
@@ -85,6 +87,7 @@ export type Database = {
           error_message?: string
           file_url?: string
           result_count?: number
+          file_size?: number
           created_at?: string
           updated_at?: string
         }

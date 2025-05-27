@@ -20,9 +20,15 @@ export default function LoginPage() {
   useEffect(() => {
     const { success } = router.query;
     if (success === 'registered') {
+      // First set up the toast
       setSuccessMsg('Account created successfully! Please check your email for the confirmation link.');
       
-      router.replace('/login', undefined, { shallow: true });
+      // Then remove success parameter from URL in the next tick
+      setTimeout(() => {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('success');
+        window.history.replaceState({}, '', url);
+      }, 0);
     }
   }, [router, router.query]);
 
