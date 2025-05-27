@@ -2,24 +2,22 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import { supabaseAdmin } from '../../../lib/supabase/supabaseAdmin';
 import { stringify } from 'csv-stringify/sync';
 
-
 const CONFIG = {
-  maxWorkers: 5,
-  batchDelay: 1000,
-  maxRetries: 5,
-  retryDelay: 1000,
+  workerCount: 30,
+  requestsPerSecond: 30,
+  maxRetries: 3,
+  retryDelay: 500,
   rateLimit: {
     perplexity: {
-      maxRequests: 2000,
-      windowMs: 60000
+      maxRequests: 1800,
+      windowMs: 60000  
     },
     findymail: {
-      maxRequests: 5,
-      windowMs: 1000
+      maxRequests: 30,  
+      windowMs: 1000    
     }
   }
 };
-
 
 let perplexityTokens = CONFIG.rateLimit.perplexity.maxRequests;
 let findymailTokens = CONFIG.rateLimit.findymail.maxRequests;
@@ -33,6 +31,27 @@ const FINDYMAIL_API_URL = 'https://app.findymail.com/api/search/name';
 const PPLX_MODEL = 'sonar-pro';
 const PPLX_COST_PER_1K_TOKENS = 0.002;
 
+const domainEmailCache = new Map<string, string>();
+const companyEmailCache = new Map<string, string>();
+
+type EnrichData = {
+  company: string;
+  website: string;
+  'Normalized Domain': string;
+  'Desired Job Title': string;
+  'Found Person Name': string;
+  'Total Cost': string;
+  'Annotation': string;
+  'Attempts': number;
+  'Person Email': string;
+  'Website Email': string;
+  'Final Email': string;
+};
+
+type EnrichRow = EnrichData & {
+  [key: string]: string | number;
+};
+
 
 function normalizeDomain(url?: string | null): string {
   if (!url) return '';
@@ -45,32 +64,45 @@ function normalizeDomain(url?: string | null): string {
 }
 
 function cleanName(name: string): string {
-  if (!name) return 'na';
+  if (!name || name.toLowerCase() === 'na' || name.trim() === '') return 'na';
   
-  let cleaned = name.replace(/\[\d+\]/g, '')
-    .replace(/\[.*?\]/g, '');
-
-  const prefixes = /(?:^|\s)(?:Dr\.?\s*|Mr\.?\s*|Mrs\.?\s*|Ms\.?\s*|Miss\s*|Prof\.?\s*|Professor\s*|Rev\.?\s*|Fr\.?\s*|Sr\.?\s*|Srta\.?\s*|Sra\.?\s*)(?=\S)/gi;
-  cleaned = cleaned.replace(prefixes, '');
-
-  const suffixes = /\s(?:PhD|MBA|MD|JD|DDS|DMD|DO|RN|NP|PA|APRN|FNP|DNP|DPM|DC|OD|DVM|DSc|EdD|DMin|PsyD|Jr\.?|Sr\.?|I{1,3}|IV|V|VI|VII|VIII|IX|X)(?=\s|$)/gi;
-  cleaned = cleaned.replace(suffixes, '');
-
-  return cleaned
+  const cleaned = name
+    .split(/\n|\*\*Explanation:|Note:|\*\*/)[0]
     .trim()
-    .replace(/^[.,;:]+/, '')
-    .replace(/[.,;:]+$/, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim() || 'na';
+    .replace(/[^\w\s,.-]/g, '') 
+    .replace(/\s+/g, ' '); 
+
+  
+  if (cleaned.length > 50 || /\b(?:explanation|note|although|however|therefore|because|since|although|while|when|whereas|additionally|furthermore|moreover|nevertheless|nonetheless|otherwise|subsequently|thereby|thus|whereas|whereby|accordingly|consequently|hence|meanwhile|otherwise|then|thereafter|thereupon|thus|whereupon)\b/i.test(cleaned)) {
+    return 'na';
+  }
+
+  
+  if (name.includes('*') || name.length > 100) {
+    return 'na';
+  }
+
+  return cleaned || 'na';
 }
 
 function cleanEmail(email: string): string {
   if (!email) return 'na';
-  return email.replace(/\[.*?\]/g, '')
+  return email
+    .replace(/\[.*?\]/g, '')
     .trim()
-    .replace(/^[.,]+/, '')
     .replace(/[.,]+$/, '');
 }
+
+function getHeaderCaseInsensitive<T extends Record<string, unknown>>(
+  obj: T, 
+  header: string
+): string | undefined {
+  const lowerHeader = header.toLowerCase();
+  const key = Object.keys(obj).find(k => k.toLowerCase() === lowerHeader);
+  const value = key ? obj[key] : undefined;
+  return typeof value === 'string' ? value : undefined;
+}
+
 
 function generatePrompt(company: string, domain: string, jobTitle: string) {
   const user = `Hello, can you help me find the person who holds the jobtitle: ${jobTitle} at company: ${company} which has website: ${domain}?
@@ -94,6 +126,137 @@ If email is not found return na.`;
   const system = `The only thing that should ever be outputted is an email if it was found or "na".`;
   
   return { user, system };
+}
+
+
+class WorkerPool<T, R> {
+  private queue: Array<() => Promise<void>> = [];
+  private activeWorkers = 0;
+  private lastRequestTimes: number[] = [];
+  private requestsPerSecond: number;
+  private workers: number;
+  private processItem: (item: T) => Promise<R>;
+  private results: R[] = [];
+  private resolveAll: (() => void) | null = null;
+
+  constructor(workers: number, requestsPerSecond: number, processItem: (item: T) => Promise<R>) {
+    this.workers = workers;
+    this.requestsPerSecond = requestsPerSecond;
+    this.processItem = processItem;
+  }
+
+  async process(items: T[], timeoutMs: number = 10 * 60 * 1000): Promise<R[]> {
+    return new Promise((resolve, reject) => {
+      this.results = [];
+      let isResolved = false;
+      
+      const timeoutId = setTimeout(() => {
+        if (!isResolved) {
+          isResolved = true;
+          console.error('WorkerPool timed out after', timeoutMs, 'ms');
+          reject(new Error(`WorkerPool timed out after ${timeoutMs}ms`));
+        }
+      }, timeoutMs);
+      
+      this.resolveAll = () => {
+        if (this.activeWorkers === 0 && !isResolved) {
+          clearTimeout(timeoutId);
+          isResolved = true;
+          resolve(this.results);
+        }
+      };
+
+      try {
+        items.forEach(item => {
+          this.queue.push(() => this.runWorker(item));
+        });
+
+        const workerCount = Math.min(this.workers, this.queue.length);
+        for (let i = 0; i < workerCount; i++) {
+          this.startWorker().catch(error => {
+            console.error('Error starting worker:', error);
+            if (!isResolved) {
+              clearTimeout(timeoutId);
+              isResolved = true;
+              reject(error);
+            }
+          });
+        }
+      } catch (error) {
+        if (!isResolved) {
+          clearTimeout(timeoutId);
+          isResolved = true;
+          reject(error);
+        }
+      }
+    });
+  }
+
+  private async startWorker(): Promise<void> {
+    if (this.queue.length === 0 || this.activeWorkers >= this.workers) {
+      return;
+    }
+
+    this.activeWorkers++;
+    const next = this.queue.shift();
+    
+    if (next) {
+      try {
+        await next();
+      } catch (error) {
+        console.error('Error in worker task:', error);
+        throw error;
+      } finally {
+        this.activeWorkers--;
+        
+        if (this.queue.length > 0) {
+          this.startWorker().catch(console.error);
+        } else if (this.activeWorkers === 0 && this.resolveAll) {
+          this.resolveAll();
+        }
+      }
+    } else {
+      this.activeWorkers--;
+    }
+  }
+
+  private async runWorker(item: T): Promise<void> {
+    const startTime = Date.now();
+    const workerTimeout = 20000;
+    
+    try {
+      const now = Date.now();
+      this.lastRequestTimes = this.lastRequestTimes.filter(time => now - time < 1000);
+      
+      if (this.lastRequestTimes.length >= this.requestsPerSecond) {
+        const timeToWait = 1000 - (now - this.lastRequestTimes[0]);
+        if (timeToWait > 0) {
+          await new Promise(resolve => setTimeout(resolve, timeToWait));
+        }
+      }
+
+      const result = await Promise.race([
+        this.processItem(item),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Worker task timed out')), workerTimeout)
+        )
+      ]);
+      
+      this.results.push(result as R);
+      this.lastRequestTimes.push(Date.now());
+      
+      const elapsed = Date.now() - startTime;
+      if (elapsed > 30000) {
+        console.warn(`Worker task took ${(elapsed / 1000).toFixed(2)}s (slow)`);
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 1000 / this.requestsPerSecond));
+      
+    } catch (error) {
+      console.error('Error in worker task:', error);
+      throw error;
+    }
+  }
 }
 
 async function waitForPerplexityToken(): Promise<void> {
@@ -160,97 +323,147 @@ function extractNameFromResponse(content: string): string {
   return 'na';
 }
 
-async function callPerplexity(user: string, system: string) {
-  await waitForPerplexityToken();
+type PerplexityResult = 
+  | { content: string; cost: number; status: 'success' }
+  | { content: 'na'; cost: 0; status: 'error' };
+
+async function callPerplexity(user: string, system: string, attempt = 1): Promise<PerplexityResult> {
+  const MAX_ATTEMPTS = 2;
+  const REQUEST_TIMEOUT = 20000;
+  const RETRY_DELAY = 1000;
   
-  const body = {
-    model: PPLX_MODEL,
-    messages: [
-      { 
-        role: 'system', 
-        content: system 
-      },
-      { 
-        role: 'user', 
-        content: user 
-      },
-    ],
-  };
-
   try {
-    const res = await fetch(PPLX_API_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${PPLX_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
+    await waitForPerplexityToken();
+    
+    const body = {
+      model: PPLX_MODEL,
+      messages: [
+        { 
+          role: 'system' as const, 
+          content: system 
+        },
+        { 
+          role: 'user' as const, 
+          content: user 
+        },
+      ],
+    };
 
-    if (!res.ok) {
-      throw new Error(`Perplexity API error: ${res.statusText}`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort(new Error(`Request timed out after ${REQUEST_TIMEOUT}ms`));
+    }, REQUEST_TIMEOUT);
+
+    try {
+      const startTime = Date.now();
+      const fetchPromise = fetch(PPLX_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${PPLX_API_KEY}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+
+      const res = await Promise.race([
+        fetchPromise,
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Request timeout')), REQUEST_TIMEOUT)
+        )
+      ]);
+
+      clearTimeout(timeoutId);
+      const endTime = Date.now();
+      const duration = (endTime - startTime) / 1000;
+
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+
+      const data = await res.json();
+      let content = data.choices[0]?.message?.content || 'na';
+      if (content !== 'na') {
+        content = extractNameFromResponse(content);
+      }
+      
+      console.log(`[${attempt}] Request completed - Time: ${duration.toFixed(2)}s`);
+      
+      return {
+        content,
+        cost: data.usage?.total_tokens * PPLX_COST_PER_1K_TOKENS / 1000 || 0,
+        status: 'success' as const
+      };
+    } catch (error: unknown) {
+      clearTimeout(timeoutId);
+      throw error;
     }
-
-    const json = await res.json();
-    let content = json.choices?.[0]?.message?.content?.trim() || 'na';
-    const tokens = json.usage?.total_tokens || 1000;
-    const cost = (tokens / 1000) * PPLX_COST_PER_1K_TOKENS;
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      console.error(`Attempt ${attempt}/${MAX_ATTEMPTS} failed: ${error.message}`);
+      
+      if (attempt < MAX_ATTEMPTS && !error.message.includes('HTTP error! status: 429')) {
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt));
+        return callPerplexity(user, system, attempt + 1);
+      }
+      
+      console.error('Final error in callPerplexity:', error.message);
+    } else {
+      console.error('Unknown error in callPerplexity:', error);
+    }
     
-    content = extractNameFromResponse(content);
-    
-    return { content, cost, status: 'success' };
-  } catch (error) {
-    console.error('Error in callPerplexity:', error);
     return { content: 'na', cost: 0, status: 'error' };
   }
 }
 
-async function callFindymail(name: string, domain: string) {
+async function callFindymail(name: string, domain: string): Promise<string> {
+  const REQUEST_TIMEOUT = 20000;
+  
+  if (!FINDYMAIL_API_KEY || !name || name.toLowerCase() === 'na' || !domain) return 'na';
+  
   try {
     await waitForFindymailToken();
     
-    const requestBody = { 
-      name: name.trim(),
-      domain: domain.trim()
-    };
-    
-    const res = await fetch(FINDYMAIL_API_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${FINDYMAIL_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort(new Error(`Findymail request timed out after ${REQUEST_TIMEOUT}ms`));
+    }, REQUEST_TIMEOUT);
 
-    if (!res.ok) {
+    try {
+      const response = await fetch(FINDYMAIL_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${FINDYMAIL_API_KEY}`,
+        },
+        body: JSON.stringify({
+          name: name.trim(),
+          domain: domain.trim()
+        }),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        console.error(`Findymail API error: ${response.status}`);
+        return 'na';
+      }
+
+      const data = await response.json();
+      return data.contact?.email || 'na';
+    } catch (error) {
+      clearTimeout(timeoutId);
+      console.error('Error in callFindymail:', error);
       return 'na';
     }
-    
-    const json = await res.json();
-    return json?.contact?.email || 'na';
-    
-  } catch {
+  } catch (error) {
+    console.error('Error in callFindymail:', error);
     return 'na';
   }
 }
 
-interface EnrichRow {
-  'company': string;
-  'website': string;
-  'Normalized Domain': string;
-  'Desired Job Title': string;
-  'Found Person Name': string;
-  'Total Cost': string;
-  'Annotation': string;
-  'Attempts': number;
-  'Person Email': string;
-  'Website Email': string;
-  'Final Email': string;
-  [key: string]: string | number;
-}
-
-async function processRow(row: EnrichRow, jobTitle: string) {
+async function processRow(row: EnrichRow, jobTitle: string, rowIndex: number) {
   const website = getHeaderCaseInsensitive(row, 'website') || '';
   const company = getHeaderCaseInsensitive(row, 'company') || '';
   const domain = normalizeDomain(website);
@@ -258,72 +471,87 @@ async function processRow(row: EnrichRow, jobTitle: string) {
 
   let content = 'na';
   let cost = 0;
+  let status = 'error';
+  let duration = 0;
   let attempts = 0;
 
-  for (let i = 0; i < 5; i++) {
+  for (let attempt = 1; attempt <= CONFIG.maxRetries; attempt++) {
+    const startTime = Date.now();
     try {
+      console.log(`[${rowIndex}] Attempt ${attempt}...`);
       const result = await callPerplexity(user, system);
-      content = result.content;
-      cost = result.cost;
-      if (content && content.toLowerCase() !== 'na') {
+      duration = (Date.now() - startTime) / 1000;
+      console.log(`[${rowIndex}] Attempt ${attempt}: ${result.status} - Time: ${duration.toFixed(2)}s`);
+      
+      if (result.status === 'success') {
+        content = result.content;
+        cost = result.cost;
+        status = result.status;
         break;
       }
-    } catch {
-      await new Promise(r => setTimeout(r, 2 ** i * 1000));
+    } catch (error) {
+      duration = (Date.now() - startTime) / 1000;
+      console.error(`[${rowIndex}] Attempt ${attempt} failed after ${duration.toFixed(2)}s:`, error);
+    }
+    
+    if (attempt < CONFIG.maxRetries) {
+      const backoff = Math.pow(2, attempt) * 1000;
+      console.log(`[${rowIndex}] Waiting ${backoff}ms before retry...`);
+      await new Promise(r => setTimeout(r, backoff));
     }
     attempts++;
   }
 
-  const names = content.toLowerCase() === 'na' ? ['na'] : 
-    cleanName(content).split(',').map(n => n.trim()).filter(n => n && n.toLowerCase() !== 'na');
-
+  const names = content.toLowerCase() === 'na' ? ['na'] : cleanName(content).split(',').map(n => n.trim());
   return names.map(name => ({
     ...row,
     'Normalized Domain': domain,
     'Desired Job Title': jobTitle,
     'Found Person Name': name,
     'Total Cost': cost.toFixed(6),
-    'Annotation': 'success',
-    'Attempts': attempts + 1,
+    'Annotation': status,
+    'Attempts': attempts,
   }));
-}
-
-function getHeaderCaseInsensitive<T extends Record<string, unknown>>(
-  obj: T, 
-  header: string
-): string | undefined {
-  const lowerHeader = header.toLowerCase();
-  const key = Object.keys(obj).find(k => k.toLowerCase() === lowerHeader);
-  const value = key ? obj[key] : undefined;
-  return typeof value === 'string' ? value : undefined;
 }
 
 async function enrichRow(row: EnrichRow) {
   const name = getHeaderCaseInsensitive(row, 'Found Person Name') || '';
-  const domain = getHeaderCaseInsensitive(row, 'Normalized Domain') || '';
+  const domain = getHeaderCaseInsensitive(row, 'Normalized Domain') || 
+                 normalizeDomain(getHeaderCaseInsensitive(row, 'website') || '');
   
-  const personEmail = name.toLowerCase() !== 'na' ? await callFindymail(name, domain) : 'na';
+  let personEmail = 'na';
   let websiteEmail = 'na';
+  
+  if (name && name.toLowerCase() !== 'na' && domain) {
+    personEmail = await callFindymail(name, domain);
+  }
 
-  if (!personEmail || personEmail.toLowerCase() === 'na') {
-    const fallback = generateFallbackPrompt(domain);
+  if ((!personEmail || personEmail.toLowerCase() === 'na') && domain) {
+    const { user, system } = generateFallbackPrompt(domain);
+    
     for (let i = 0; i < 3; i++) {
-      try {
-        const fallbackResult = await callPerplexity(fallback.user, fallback.system);
-        if (fallbackResult.status === 'success' && 
-            fallbackResult.content.includes('@') && 
-            fallbackResult.content.includes('.')) {
-          websiteEmail = cleanEmail(fallbackResult.content);
-          break;
-        }
-      } catch {
-        await new Promise(r => setTimeout(r, 2 ** i * 1000)); 
+      const result = await callPerplexity(user, system);
+      if (result.status === 'success' && 
+          result.content && 
+          result.content.includes('@') && 
+          result.content.includes('.')) {
+        websiteEmail = cleanEmail(result.content);
+        break;
       }
     }
   }
 
-  const finalEmail = (personEmail && personEmail.toLowerCase() !== 'na') ? personEmail : websiteEmail;
-  
+  const finalEmail = (personEmail && personEmail.toLowerCase() !== 'na') ? 
+                    personEmail : websiteEmail;
+
+  const company = getHeaderCaseInsensitive(row, 'company');
+  if (company && finalEmail !== 'na') {
+    companyEmailCache.set(company, finalEmail);
+  }
+  if (domain && websiteEmail !== 'na') {
+    domainEmailCache.set(domain, websiteEmail);
+  }
+
   return {
     ...row,
     'Person Email': personEmail,
@@ -356,41 +584,48 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }))
     );
 
-    const nameResults = await Promise.all(
-      expandedRows.map((row: EnrichRow) => processRow(row, row['Desired Job Title']))
+    let nameResults: EnrichRow[] = [];
+    
+    console.log(`🔸 Processing ${expandedRows.length} rows with ${CONFIG.workerCount} workers...`);
+    
+    const rowProcessor = async (row: EnrichRow) => {
+      const rowIndex = expandedRows.indexOf(row);
+      return processRow(row, row['Desired Job Title'], rowIndex);
+    };
+    
+    const workerPool = new WorkerPool<EnrichRow, EnrichRow[]>(
+      CONFIG.workerCount,
+      CONFIG.requestsPerSecond,
+      rowProcessor
     );
     
-    const processedNameResults = [];
-    for (let i = 0; i < expandedRows.length; i++) {
-      const result = nameResults[i];
-      if (Array.isArray(result)) {
-        processedNameResults.push(...result);
-      } else if (result) {
-        processedNameResults.push(result);
-      }
-    }
-
-    const uniqueNameResults = processedNameResults
-      .filter(row => String(row['Found Person Name']).toLowerCase() !== 'na');
+    const batchResults = await workerPool.process(expandedRows, 30 * 60 * 1000);
+    nameResults = batchResults.flat();
+    
+    const flattenedNameResults = nameResults.flat();
+    const uniqueNameResults = flattenedNameResults
+      .filter(row => String(row['Found Person Name']).toLowerCase() !== 'na')
+      .filter((row, index, self) => 
+        index === self.findIndex(r => r['Found Person Name'] === row['Found Person Name'])
+      );
 
     const enrichedResults = await Promise.all(
       uniqueNameResults.map((row: EnrichRow) => enrichRow(row))
     );
 
     const seenEmails = new Set<string>();
-    const deduplicatedResults = [];
-    
-    for (const row of enrichedResults) {
+    const deduplicatedResults = enrichedResults.filter(row => {
       const email = String(row['Final Email']).toLowerCase();
-      if (email !== 'na' && !seenEmails.has(email)) {
-        seenEmails.add(email);
-        deduplicatedResults.push(row);
+      if (email === 'na' || seenEmails.has(email)) {
+        return false;
       }
-    }
+      seenEmails.add(email);
+      return true;
+    });
 
     let fileUrl: string | undefined;
     
-    if (deduplicatedResults && deduplicatedResults.length > 0) {
+    if (deduplicatedResults.length > 0) {
       const output = stringify(deduplicatedResults, { header: true });
       const fileName = `enrich-results/${resultId}.csv`;
 
@@ -452,7 +687,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       if (!userError && userData) {
         const currentTokens = userData.user_tokens || 0;
-        const newTokens = currentTokens - (deduplicatedResults?.length || 0);
+        const newTokens = currentTokens - enrichedResults.length;
 
         await supabaseAdmin
           .from('users')
@@ -461,6 +696,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    console.log(`🔹 Saving ${deduplicatedResults.length} enriched results to database...`);
+    
     const { error: updateError } = await supabaseAdmin
       .from('enrich_results')
       .update({
@@ -485,11 +722,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           error_message: error instanceof Error ? error.message : 'Unknown error',
           updated_at: new Date().toISOString()
         })
-        .eq('id', resultId as string);
+        .eq('id', resultId);
     }
 
-    return res.status(500).json({ 
-      error: error instanceof Error ? error.message : 'Unknown error' 
-    });
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
   }
 } 
