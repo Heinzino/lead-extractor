@@ -5,24 +5,22 @@ import { stringify } from 'csv-stringify/sync';
 const CONFIG = {
   workerCount: 30,
   requestsPerSecond: 30,
-  maxRetries: 3,
+  maxRetries: 5,
   retryDelay: 500,
   rateLimit: {
     perplexity: {
-      maxRequests: 1800,
-      windowMs: 60000  
+      maxRequests: 2000,
+      windowMs: 60000
     },
     findymail: {
-      maxRequests: 30,  
-      windowMs: 1000    
+      maxRequests: 30,
+      windowMs: 1000
     }
   }
 };
 
-let perplexityTokens = CONFIG.rateLimit.perplexity.maxRequests;
-let findymailTokens = CONFIG.rateLimit.findymail.maxRequests;
-let lastPerplexityRefill = Date.now();
-let lastFindymailRefill = Date.now();
+let perplexityRequestTimes: number[] = [];
+let findymailRequestTimes: number[] = [];
 
 const PPLX_API_KEY = process.env.PPLX_API_KEY;
 const FINDYMAIL_API_KEY = process.env.FINDYMAIL_API_KEY;
@@ -57,28 +55,77 @@ function normalizeDomain(url?: string | null): string {
   if (!url) return '';
   try {
     const parsed = new URL(url.startsWith('http') ? url : `https://${url}`);
-    return parsed.hostname.replace('www.', '');
+    let domain = parsed.hostname.replace('www.', '');
+    domain = domain.split('?')[0];
+    return domain.trim();
   } catch {
-    return url.replace('www.', '');
+    return '';
   }
 }
 
 function cleanName(name: string): string {
   if (!name || name.toLowerCase() === 'na' || name.trim() === '') return 'na';
   
-  const cleaned = name
-    .split(/\n|\*\*Explanation:|Note:|\*\*/)[0]
+  let cleaned = name.replace(/\[\d+\]/g, '');
+  cleaned = cleaned.replace(/\[.*?\]/g, '');
+  
+  const titles = [
+    'Dr\\.?',
+    'Mr\\.?',
+    'Mrs\\.?',
+    'Ms\\.?',
+    'Miss',
+    'Prof\\.?',
+    'Professor',
+    'Sir',
+    'Madam',
+    'Dame',
+    'Lord',
+    'Lady',
+    'Rev\\.?',
+    'Reverend',
+    'Fr\\.?',
+    'Father',
+    'CEO',
+    'CTO',
+    'CFO',
+    'COO',
+    'VP',
+    'President',
+    'Director',
+    'Manager',
+    'Head of',
+    'Lead',
+    'Senior',
+    'Jr\\.?',
+    'Sr\\.?',
+    'I{1,3}',
+    'IV',
+    'PhD',
+    'MD',
+    'MBA',
+    'CPA',
+    'Esq\\.?'
+  ].join('|');
+
+  cleaned = cleaned
+    .replace(new RegExp(`^(?:${titles})\\s+`, 'i'), '')
+    .replace(new RegExp(`\\s+(?:${titles})$`, 'i'), '')
+    .replace(new RegExp(`\\s+(?:${titles})\\s+`, 'ig'), ' ')
+    .replace(/\s+[A-Z]\.?\s+/g, ' ') 
+    .replace(/\s+[A-Z][a-z]{0,2}\.\s+/g, ' ') 
     .trim()
-    .replace(/[^\w\s,.-]/g, '') 
-    .replace(/\s+/g, ' '); 
+    .replace(/[.,]+$/, '')
+    .replace(/\s+/g, ' ') 
+    .trim();
 
-  
-  if (cleaned.length > 50 || /\b(?:explanation|note|although|however|therefore|because|since|although|while|when|whereas|additionally|furthermore|moreover|nevertheless|nonetheless|otherwise|subsequently|thereby|thus|whereas|whereby|accordingly|consequently|hence|meanwhile|otherwise|then|thereafter|thereupon|thus|whereupon)\b/i.test(cleaned)) {
-    return 'na';
-  }
-
-  
-  if (name.includes('*') || name.length > 100) {
+  if (
+    /\b(?:none|cannot|could not|unable|not found|no.*?found|explanation|note|however|therefore|because)\b/i.test(cleaned) ||
+    cleaned.length > 50 ||
+    cleaned.split(/\s+/).length > 4 ||
+    /[*"']/.test(cleaned) ||
+    cleaned.includes('\n')
+  ) {
     return 'na';
   }
 
@@ -87,10 +134,23 @@ function cleanName(name: string): string {
 
 function cleanEmail(email: string): string {
   if (!email) return 'na';
-  return email
-    .replace(/\[.*?\]/g, '')
-    .trim()
-    .replace(/[.,]+$/, '');
+  
+  const cleaned = email.replace(/\[.*?\]/g, '').trim().replace(/[,]+$/, '');
+
+  if (
+    cleaned.length > 100 ||
+    cleaned.includes(' ') ||
+    !/^[a-zA-Z0-9.!#$%&'_+-/=?^`{|}~]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/.test(cleaned) ||
+    cleaned.includes('\n') ||
+    /[*\[\](){}]/.test(cleaned) ||
+    (cleaned.match(/@/g) || []).length !== 1 ||
+    /xxxx+/i.test(cleaned) ||
+    /\b(?:none|cannot|could not|unable|not found|no.*?found|explanation|note)\b/i.test(cleaned)
+  ) {
+    return 'na';
+  }
+
+  return cleaned;
 }
 
 function getHeaderCaseInsensitive<T extends Record<string, unknown>>(
@@ -145,23 +205,12 @@ class WorkerPool<T, R> {
     this.processItem = processItem;
   }
 
-  async process(items: T[], timeoutMs: number = 10 * 60 * 1000): Promise<R[]> {
-    return new Promise((resolve, reject) => {
+  async process(items: T[]): Promise<R[]> {
+    return new Promise((resolve) => {
       this.results = [];
-      let isResolved = false;
-      
-      const timeoutId = setTimeout(() => {
-        if (!isResolved) {
-          isResolved = true;
-          console.error('WorkerPool timed out after', timeoutMs, 'ms');
-          reject(new Error(`WorkerPool timed out after ${timeoutMs}ms`));
-        }
-      }, timeoutMs);
       
       this.resolveAll = () => {
-        if (this.activeWorkers === 0 && !isResolved) {
-          clearTimeout(timeoutId);
-          isResolved = true;
+        if (this.activeWorkers === 0) {
           resolve(this.results);
         }
       };
@@ -173,21 +222,13 @@ class WorkerPool<T, R> {
 
         const workerCount = Math.min(this.workers, this.queue.length);
         for (let i = 0; i < workerCount; i++) {
-          this.startWorker().catch(error => {
-            console.error('Error starting worker:', error);
-            if (!isResolved) {
-              clearTimeout(timeoutId);
-              isResolved = true;
-              reject(error);
-            }
+          this.startWorker().catch(err => {
+            console.error('Error starting worker:', err instanceof Error ? err.message : 'Unknown error');
           });
         }
-      } catch (error) {
-        if (!isResolved) {
-          clearTimeout(timeoutId);
-          isResolved = true;
-          reject(error);
-        }
+      } catch (err) {
+        console.error('Error in worker pool:', err instanceof Error ? err.message : 'Unknown error');
+        resolve(this.results);
       }
     });
   }
@@ -203,14 +244,15 @@ class WorkerPool<T, R> {
     if (next) {
       try {
         await next();
-      } catch (error) {
-        console.error('Error in worker task:', error);
-        throw error;
+      } catch (err) {
+        console.error('Error in worker task:', err instanceof Error ? err.message : 'Unknown error');
       } finally {
         this.activeWorkers--;
         
         if (this.queue.length > 0) {
-          this.startWorker().catch(console.error);
+          this.startWorker().catch(err => {
+            console.error('Error restarting worker:', err instanceof Error ? err.message : 'Unknown error');
+          });
         } else if (this.activeWorkers === 0 && this.resolveAll) {
           this.resolveAll();
         }
@@ -221,106 +263,53 @@ class WorkerPool<T, R> {
   }
 
   private async runWorker(item: T): Promise<void> {
-    const startTime = Date.now();
     const workerTimeout = 20000;
     
     try {
-      const now = Date.now();
-      this.lastRequestTimes = this.lastRequestTimes.filter(time => now - time < 1000);
-      
-      if (this.lastRequestTimes.length >= this.requestsPerSecond) {
-        const timeToWait = 1000 - (now - this.lastRequestTimes[0]);
-        if (timeToWait > 0) {
-          await new Promise(resolve => setTimeout(resolve, timeToWait));
-        }
-      }
-
       const result = await Promise.race([
         this.processItem(item),
-        new Promise<never>((_, reject) => 
+        new Promise<R>((_, reject) => 
           setTimeout(() => reject(new Error('Worker task timed out')), workerTimeout)
         )
       ]);
       
-      this.results.push(result as R);
-      this.lastRequestTimes.push(Date.now());
-      
-      const elapsed = Date.now() - startTime;
-      if (elapsed > 30000) {
-        console.warn(`Worker task took ${(elapsed / 1000).toFixed(2)}s (slow)`);
-      }
+      this.results.push(result);
       
       await new Promise(resolve => setTimeout(resolve, 1000 / this.requestsPerSecond));
       
-    } catch (error) {
-      console.error('Error in worker task:', error);
-      throw error;
+    } catch (err) {
+      
+      console.error('Worker task error:', err instanceof Error ? err.message : 'Unknown error');
     }
   }
 }
 
 async function waitForPerplexityToken(): Promise<void> {
   const now = Date.now();
-  const timePassed = now - lastPerplexityRefill;
-  const newTokens = Math.floor(timePassed / CONFIG.rateLimit.perplexity.windowMs * CONFIG.rateLimit.perplexity.maxRequests);
   
-  if (newTokens > 0) {
-    perplexityTokens = Math.min(CONFIG.rateLimit.perplexity.maxRequests, perplexityTokens + newTokens);
-    lastPerplexityRefill = now;
-  }
-
-  if (perplexityTokens <= 0) {
-    const waitTime = CONFIG.rateLimit.perplexity.windowMs - (now - lastPerplexityRefill) + 100;
+  perplexityRequestTimes = perplexityRequestTimes.filter(time => now - time < CONFIG.rateLimit.perplexity.windowMs);
+  
+  if (perplexityRequestTimes.length >= CONFIG.rateLimit.perplexity.maxRequests) {
+    const waitTime = CONFIG.rateLimit.perplexity.windowMs - (now - perplexityRequestTimes[0]) + 100;
     await new Promise(resolve => setTimeout(resolve, waitTime));
     return waitForPerplexityToken();
   }
-
-  perplexityTokens--;
+  
+  perplexityRequestTimes.push(now);
 }
 
 async function waitForFindymailToken(): Promise<void> {
   const now = Date.now();
-  const timePassed = now - lastFindymailRefill;
-  const newTokens = Math.floor(timePassed / CONFIG.rateLimit.findymail.windowMs * CONFIG.rateLimit.findymail.maxRequests);
   
-  if (newTokens > 0) {
-    findymailTokens = Math.min(CONFIG.rateLimit.findymail.maxRequests, findymailTokens + newTokens);
-    lastFindymailRefill = now;
-  }
-
-  if (findymailTokens <= 0) {
-    const waitTime = CONFIG.rateLimit.findymail.windowMs - (now - lastFindymailRefill);
+  findymailRequestTimes = findymailRequestTimes.filter(time => now - time < CONFIG.rateLimit.findymail.windowMs);
+  
+  if (findymailRequestTimes.length >= CONFIG.rateLimit.findymail.maxRequests) {
+    const waitTime = CONFIG.rateLimit.findymail.windowMs - (now - findymailRequestTimes[0]);
     await new Promise(resolve => setTimeout(resolve, waitTime));
     return waitForFindymailToken();
   }
-
-  findymailTokens--;
-}
-
-function extractNameFromResponse(content: string): string {
-  if (!content) return 'na';
   
-  const trimmedContent = content.trim();
-  if (trimmedContent.toLowerCase() === 'na') return 'na';
-
-  const patterns = [
-    /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)(?:\s|\(|$)/,
-    /([A-Z][a-z]+,\s*[A-Z][a-z]+)/,
-    /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/,
-    /(\b[A-Z][a-z]+\b)/
-  ];
-
-  for (const pattern of patterns) {
-    const match = trimmedContent.match(pattern);
-    if (match && match[1]) {
-      const name = match[1].replace(/[^\w\s,]/g, '').trim();
-      if (name.split(/\s+/).length <= 4) {
-        return name;
-      }
-    }
-  }
-  
-  return 'na';
+  findymailRequestTimes.push(now);
 }
 
 type PerplexityResult = 
@@ -328,9 +317,7 @@ type PerplexityResult =
   | { content: 'na'; cost: 0; status: 'error' };
 
 async function callPerplexity(user: string, system: string, attempt = 1): Promise<PerplexityResult> {
-  const MAX_ATTEMPTS = 2;
-  const REQUEST_TIMEOUT = 20000;
-  const RETRY_DELAY = 1000;
+  const REQUEST_TIMEOUT = 60000;
   
   try {
     await waitForPerplexityToken();
@@ -338,14 +325,8 @@ async function callPerplexity(user: string, system: string, attempt = 1): Promis
     const body = {
       model: PPLX_MODEL,
       messages: [
-        { 
-          role: 'system' as const, 
-          content: system 
-        },
-        { 
-          role: 'user' as const, 
-          content: user 
-        },
+        { role: 'system', content: system },
+        { role: 'user', content: user },
       ],
     };
 
@@ -355,8 +336,7 @@ async function callPerplexity(user: string, system: string, attempt = 1): Promis
     }, REQUEST_TIMEOUT);
 
     try {
-      const startTime = Date.now();
-      const fetchPromise = fetch(PPLX_API_URL, {
+      const res = await fetch(PPLX_API_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -366,50 +346,35 @@ async function callPerplexity(user: string, system: string, attempt = 1): Promis
         signal: controller.signal
       });
 
-      const res = await Promise.race([
-        fetchPromise,
-        new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('Request timeout')), REQUEST_TIMEOUT)
-        )
-      ]);
-
       clearTimeout(timeoutId);
-      const endTime = Date.now();
-      const duration = (endTime - startTime) / 1000;
 
       if (!res.ok) {
         throw new Error(`HTTP error! status: ${res.status}`);
       }
 
       const data = await res.json();
-      let content = data.choices[0]?.message?.content || 'na';
-      if (content !== 'na') {
-        content = extractNameFromResponse(content);
-      }
-      
-      console.log(`[${attempt}] Request completed - Time: ${duration.toFixed(2)}s`);
+      const content = data.choices[0]?.message?.content?.trim() || 'na';
+      const tokens = data.usage?.total_tokens || 1000;
+      const cost = (tokens / 1000) * PPLX_COST_PER_1K_TOKENS;
       
       return {
         content,
-        cost: data.usage?.total_tokens * PPLX_COST_PER_1K_TOKENS / 1000 || 0,
+        cost,
         status: 'success' as const
       };
-    } catch (error: unknown) {
+    } catch (error) {
       clearTimeout(timeoutId);
       throw error;
     }
   } catch (error: unknown) {
     if (error instanceof Error) {
-      console.error(`Attempt ${attempt}/${MAX_ATTEMPTS} failed: ${error.message}`);
+      console.error(`Attempt ${attempt}/${CONFIG.maxRetries} failed: ${error.message}`);
       
-      if (attempt < MAX_ATTEMPTS && !error.message.includes('HTTP error! status: 429')) {
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt));
+      if (attempt < CONFIG.maxRetries) {
+        const backoff = Math.pow(2, attempt - 1) * 1000;
+        await new Promise(resolve => setTimeout(resolve, backoff));
         return callPerplexity(user, system, attempt + 1);
       }
-      
-      console.error('Final error in callPerplexity:', error.message);
-    } else {
-      console.error('Unknown error in callPerplexity:', error);
     }
     
     return { content: 'na', cost: 0, status: 'error' };
@@ -417,7 +382,7 @@ async function callPerplexity(user: string, system: string, attempt = 1): Promis
 }
 
 async function callFindymail(name: string, domain: string): Promise<string> {
-  const REQUEST_TIMEOUT = 20000;
+  const REQUEST_TIMEOUT = 30000;
   
   if (!FINDYMAIL_API_KEY || !name || name.toLowerCase() === 'na' || !domain) return 'na';
   
@@ -446,19 +411,16 @@ async function callFindymail(name: string, domain: string): Promise<string> {
       clearTimeout(timeoutId);
       
       if (!response.ok) {
-        console.error(`Findymail API error: ${response.status}`);
         return 'na';
       }
 
       const data = await response.json();
       return data.contact?.email || 'na';
-    } catch (error) {
+    } catch {
       clearTimeout(timeoutId);
-      console.error('Error in callFindymail:', error);
       return 'na';
     }
-  } catch (error) {
-    console.error('Error in callFindymail:', error);
+  } catch {
     return 'na';
   }
 }
@@ -472,34 +434,26 @@ async function processRow(row: EnrichRow, jobTitle: string, rowIndex: number) {
   let content = 'na';
   let cost = 0;
   let status = 'error';
-  let duration = 0;
   let attempts = 0;
 
   for (let attempt = 1; attempt <= CONFIG.maxRetries; attempt++) {
-    const startTime = Date.now();
     try {
-      console.log(`[${rowIndex}] Attempt ${attempt}...`);
-      const result = await callPerplexity(user, system);
-      duration = (Date.now() - startTime) / 1000;
-      console.log(`[${rowIndex}] Attempt ${attempt}: ${result.status} - Time: ${duration.toFixed(2)}s`);
+      const result = await callPerplexity(user, system, attempt);
       
       if (result.status === 'success') {
         content = result.content;
         cost = result.cost;
         status = result.status;
+        attempts = attempt;
         break;
       }
-    } catch (error) {
-      duration = (Date.now() - startTime) / 1000;
-      console.error(`[${rowIndex}] Attempt ${attempt} failed after ${duration.toFixed(2)}s:`, error);
+    } catch (err) {
+      if (err instanceof Error) {
+        console.error(`[${rowIndex}] Attempt ${attempt} failed:`, err.message);
+      } else {
+        console.error(`[${rowIndex}] Attempt ${attempt} failed with unknown error`);
+      }
     }
-    
-    if (attempt < CONFIG.maxRetries) {
-      const backoff = Math.pow(2, attempt) * 1000;
-      console.log(`[${rowIndex}] Waiting ${backoff}ms before retry...`);
-      await new Promise(r => setTimeout(r, backoff));
-    }
-    attempts++;
   }
 
   const names = content.toLowerCase() === 'na' ? ['na'] : cleanName(content).split(',').map(n => n.trim());
@@ -599,7 +553,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       rowProcessor
     );
     
-    const batchResults = await workerPool.process(expandedRows, 30 * 60 * 1000);
+    const batchResults = await workerPool.process(expandedRows);
     nameResults = batchResults.flat();
     
     const flattenedNameResults = nameResults.flat();
