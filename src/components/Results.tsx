@@ -46,6 +46,12 @@ export default function Results() {
       setToastMessage('Processing your request! This might take a few minutes.');
       setToastType('success');
       setShowToast(true);
+      
+      setTimeout(() => {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('status');
+        window.history.replaceState({}, '', url);
+      }, 0);
     }
 
     fetchResults();

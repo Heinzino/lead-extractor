@@ -45,6 +45,13 @@ const TokenPurchaseSlider: React.FC<TokenPurchaseSliderProps> = ({ onPurchaseSuc
         setToastType('success');
         setShowToast(true);
         setHasShownRedirectToast(true);
+        
+        setTimeout(() => {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('payment_intent');
+          url.searchParams.delete('redirect_status');
+          window.history.replaceState({}, '', url);
+        }, 0);
       }
     }
   }, [router, hasShownRedirectToast]);
