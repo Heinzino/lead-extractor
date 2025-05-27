@@ -37,12 +37,14 @@ export async function POST(request: NextRequest) {
                 );
 
                 const resultsHeader = headers.join(',') + '\n';
-                const resultsRows = results.map(result => 
-                    headers.map(header => {
-                        const value = result[header] ?? '';
-                        return `"${String(value).replace(/"/g, '""')}"`;
-                    }).join(',')
-                ).join('\n');
+                const resultsRows = results
+                    .filter(result => result.website)
+                    .map(result => 
+                        headers.map(header => {
+                            const value = result[header] ?? '';
+                            return `"${String(value).replace(/"/g, '""')}"`;
+                        }).join(',')
+                    ).join('\n');
                 
                 const csvContent = resultsHeader + resultsRows;
 
