@@ -129,8 +129,15 @@ export default function Results() {
     if (!bytes) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+    
+    let i = 0;
+    let size = bytes;
+    while (size >= k && i < sizes.length - 1) {
+      size /= k;
+      i++;
+    }
+    
+    return `${parseFloat(size.toFixed(2))} ${sizes[i]}`;
   };
 
   const closeToast = () => {
