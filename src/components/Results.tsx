@@ -208,6 +208,13 @@ export default function Results() {
                         </div>
                         <button
                           onClick={async () => {
+
+                            if (result.type === 'enrich') {
+                              // No CORS required: navigate to URL so browser downloads directly
+                              window.location.href = result.file_url;
+                              return;
+                            }
+
                             try {
                               const response = await fetch(result.file_url!);
                               const blob = await response.blob();
