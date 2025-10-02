@@ -19,10 +19,16 @@ export default function ContactFinder() {
   const [hasUploadError, setHasUploadError] = useState(false);
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
 
-  // NEW: header mapping state
   const [headers, setHeaders] = useState<string[]>([]);
   const [websiteColumn, setWebsiteColumn] = useState<string>('');
   const [companyColumn, setCompanyColumn] = useState<string>('');
+
+  const [locationColumn, setLocationColumn] = useState<string>('');
+  const [companyLocation, setCompanyLocation] = useState('');
+  const [excludeTitles, setExcludeTitles] = useState('');
+  const [useVariants, setUseVariants] = useState(false);
+  const [useAiVariants, setUseAiVariants] = useState(false);
+  const [pageSize, setPageSize] = useState<number>(10);
 
   const handleFileUpload = useCallback((uploadedFile: File) => {
     if (!uploadedFile.name.endsWith('.csv')) {
@@ -84,6 +90,7 @@ export default function ContactFinder() {
     setHeaders([]);
     setWebsiteColumn('');
     setCompanyColumn('');
+    setLocationColumn('');
   }, []);
 
   const downloadSampleFile = useCallback(() => {
@@ -286,6 +293,16 @@ export default function ContactFinder() {
                           ))}
                         </select>
                       </div>
+                      <div>
+                        <label className="block text-sm text-gray-500 mb-1">Location column (optional)</label>
+                        <select className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                                value={locationColumn}
+                                onChange={(e) => setLocationColumn(e.target.value)}>
+                          <option value="">(None)</option>
+                          {headers.map((h) => <option key={h} value={h}>{h}</option>)}
+                        </select>
+                        <p className="text-xs text-gray-400 mt-1">If set, we’ll use this column per row. Otherwise we can use the free-text below.</p>
+                      </div>
                     </div>
                 ) : (
                     <p className="text-xs text-gray-400 mt-3">
@@ -324,20 +341,93 @@ export default function ContactFinder() {
               </p>
             </div>
 
-            <div>
-              <label htmlFor="file-name" className="block text-sm text-gray-500 mb-2">
-                What do you want to name your file?
-              </label>
-              <input
-                  id="file-name"
-                  type="text"
-                  placeholder="my-enriched-list"
-                  value={fileName}
-                  onChange={(e) => setFileName(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-              />
-            </div>
+          {/* EXCLUDE TITLES */}
+          <div>
+            <label htmlFor="exclude-titles" className="block text-sm text-gray-500 mb-2">
+              Exclude titles (optional)
+            </label>
+            <input
+                id="exclude-titles"
+                type="text"
+                placeholder="Intern, Assistant"
+                value={excludeTitles}
+                onChange={(e) => setExcludeTitles(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+            />
+            <p className="mt-2 text-xs text-gray-400">Comma-separated list. These will be filtered out.</p>
           </div>
+
+          {/* LOCATION FREE TEXT */}
+          <div>
+            <label htmlFor="company-location" className="block text-sm text-gray-500 mb-2">
+              Location (free text, optional)
+            </label>
+            <input
+                id="company-location"
+                type="text"
+                placeholder="US, San Francisco, CA, Europe, etc."
+                value={companyLocation}
+                onChange={(e) => setCompanyLocation(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+            />
+            <p className="mt-2 text-xs text-gray-400">
+              If a Location column is mapped, that per-row value wins; otherwise we’ll use this exact text.
+            </p>
+          </div>
+
+          {/* PAGE SIZE */}
+          <div>
+            <label htmlFor="page-size" className="block text-sm text-gray-500 mb-2">
+              Page size (1–200)
+            </label>
+            <input
+                id="page-size"
+                type="number"
+                min={1}
+                max={200}
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value || 10))}
+                className="w-full max-w-xs px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+            />
+          </div>
+
+          {/* TOGGLES */}
+          <div className="flex items-center gap-6">
+            <label className="inline-flex items-center gap-2 cursor-pointer">
+              <input
+                  type="checkbox"
+                  checked={useVariants}
+                  onChange={(e) => setUseVariants(e.target.checked)}
+                  className="h-4 w-4"
+              />
+              <span className="text-sm text-gray-700">Use variants</span>
+            </label>
+
+            <label className="inline-flex items-center gap-2 cursor-pointer">
+              <input
+                  type="checkbox"
+                  checked={useAiVariants}
+                  onChange={(e) => setUseAiVariants(e.target.checked)}
+                  className="h-4 w-4"
+              />
+              <span className="text-sm text-gray-700">Use AI variants</span>
+            </label>
+          </div>
+
+          <div>
+            <label htmlFor="file-name" className="block text-sm text-gray-500 mb-2">
+              What do you want to name your file?
+            </label>
+            <input
+                id="file-name"
+                type="text"
+                placeholder="my-enriched-list"
+                value={fileName}
+                onChange={(e) => setFileName(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+            />
+          </div>
+        </div>
 
           <div className="pt-2">
             <Button
