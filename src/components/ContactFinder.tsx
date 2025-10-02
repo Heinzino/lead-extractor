@@ -140,9 +140,16 @@ export default function ContactFinder() {
       formData.append('jobTitles', jobTitles);
       formData.append('fileName', fileName);
 
-      // NEW: include the chosen column names for your API
       formData.append('websiteColumn', websiteColumn);
       formData.append('companyColumn', companyColumn);
+
+      if (locationColumn) formData.append('locationColumn', locationColumn);
+      if (companyLocation) formData.append('companyLocation', companyLocation);
+
+      if (excludeTitles) formData.append('excludeTitles', excludeTitles);
+      formData.append('useVariants', useVariants ? '1' : '0');
+      formData.append('useAiVariants', useAiVariants ? '1' : '0');
+      formData.append('pageSize', String(Math.min(200, Math.max(1, pageSize))));
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
