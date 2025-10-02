@@ -210,7 +210,7 @@ export default function Results() {
                           onClick={async () => {
 
                             if (result.type === 'enrich') {
-                              // No CORS required: navigate to URL so browser downloads directly
+                              if (!result.file_url) return;
                               window.location.href = result.file_url;
                               return;
                             }
