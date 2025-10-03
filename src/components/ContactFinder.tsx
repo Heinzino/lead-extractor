@@ -382,7 +382,6 @@ export default function ContactFinder() {
             </label>
 
             <LocationPicker
-                mode="city"
                 onChange={(loc) => setCompanyLocation(loc)}
                 className="w-full"
             />
