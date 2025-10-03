@@ -67,7 +67,7 @@ export default function FileUploaderBox({
                            !!rowData.zip;
               break;
             case 'businesses':
-              isValidRow = hasMeaningfulContent(rowData.company || '') && !!rowData.website;
+              isValidRow = true; //hasMeaningfulContent(rowData.company || '') && !!rowData.website;
               break;
           }
           if (isValidRow) validRowCount++;
