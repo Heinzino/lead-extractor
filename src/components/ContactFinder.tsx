@@ -5,6 +5,7 @@ import Button from './Button';
 import Toast from './Toast';
 import FileUploaderBox from './FileUploaderBox';
 import YouTubeModal from './YouTubeModal';
+import LocationPicker from './LocationPicker';
 import { supabase } from '../lib/supabase/supabaseClient';
 
 export default function ContactFinder() {
@@ -105,6 +106,11 @@ export default function ContactFinder() {
       [websiteColumn, companyColumn]
   );
 
+  const locationReady = useMemo(
+      () => Boolean(locationColumn) || Boolean(companyLocation),
+      [locationColumn, companyLocation]
+  );
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file) {
@@ -124,6 +130,11 @@ export default function ContactFinder() {
       return;
     } else if (!mappingReady) {
       setToastMessage('Please select which columns are Website and Company Name');
+      setToastType('error');
+      setShowToast(true);
+      return;
+    } else if (!locationReady) {
+      setToastMessage('Please either map a Location column or pick a location.');
       setToastType('error');
       setShowToast(true);
       return;
@@ -366,19 +377,18 @@ export default function ContactFinder() {
 
           {/* LOCATION FREE TEXT */}
           <div>
-            <label htmlFor="company-location" className="block text-sm text-gray-500 mb-2">
-              Location (free text, optional)
+            <label className="block text-sm text-gray-500 mb-2">
+              Location (optional)
             </label>
-            <input
-                id="company-location"
-                type="text"
-                placeholder="US, San Francisco, CA, Europe, etc."
-                value={companyLocation}
-                onChange={(e) => setCompanyLocation(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+
+            <LocationPicker
+                mode="city"
+                onChange={(loc) => setCompanyLocation(loc)}
+                className="w-full"
             />
+
             <p className="mt-2 text-xs text-gray-400">
-              If a Location column is mapped, that per-row value wins; otherwise we’ll use this exact text.
+              If a Location column is mapped, that per-row value wins. Otherwise we’ll send this picker’s value.
             </p>
           </div>
 
