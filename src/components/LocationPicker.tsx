@@ -47,7 +47,7 @@ export default function LocationPicker({
     const emit = useCallback((c: ICountry | null, s: IState | null, ct: ICity | null) => {
         if (!c) { onChange(''); return; }
         let str = c.isoCode;            // e.g. 'US'
-        if (s)  str += `:${s.isoCode}`; // e.g. 'US:CA'
+        if (s)  str += `:${s.name}`; // e.g. 'US:CA'
         if (ct) str += `:${ct.name}`;   // e.g. 'US:CA:San Francisco'
         onChange(str);
     }, [onChange]);
