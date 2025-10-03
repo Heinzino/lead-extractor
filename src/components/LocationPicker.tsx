@@ -60,8 +60,8 @@ export default function LocationPicker({
                     options={countries}
                     value={country ? { value: country.isoCode, label: country.name, raw: country } : null}
                     onChange={(opt: SingleValue<Option<ICountry>>) => {
-                        const c = opt ? Country.getCountryByCode(opt.value) : null;
-                        setCountry(c);                 // never undefined
+                        const c = opt ? (Country.getCountryByCode(opt.value) ?? null) : null;
+                        setCountry(c);          // now ICountry | null (never undefined)
                         setState(null);
                         setCity(null);
                         emit(c, null, null);
@@ -75,8 +75,8 @@ export default function LocationPicker({
                     options={states}
                     value={state ? { value: state.isoCode, label: state.name, raw: state } : null}
                     onChange={(opt: SingleValue<Option<IState>>) => {
-                        const s = opt && country ? State.getStateByCodeAndCountry(opt.value, country.isoCode) : null;
-                        setState(s);                   // never undefined
+                        const s = opt && country ? (State.getStateByCodeAndCountry(opt.value, country.isoCode) ?? null) : null;
+                        setState(s);            // IState | null
                         setCity(null);
                         emit(country, s, null);
                     }}
@@ -90,8 +90,8 @@ export default function LocationPicker({
                     options={cities}
                     value={city ? { value: city.name, label: city.name, raw: city } : null}
                     onChange={(opt: SingleValue<Option<ICity>>) => {
-                        const ct = opt ? opt.raw : null;
-                        setCity(ct);                   // never undefined
+                        const ct = opt ? (opt.raw ?? null) : null; // raw is already ICity, but keep it tidy
+                        setCity(ct);             // ICity | null
                         emit(country, state, ct);
                     }}
                     isClearable
