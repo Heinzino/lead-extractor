@@ -1,7 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import Select from 'react-select';
+import { useMemo, useState, useCallback } from 'react';
+import Select, { SingleValue } from 'react-select';
 import { Country, State, City, type ICountry, type IState, type ICity } from 'country-state-city';
 
 type Option<T> = { value: string; label: string; raw: T };
@@ -29,27 +29,28 @@ export default function LocationPicker({
     );
 
     const states: Option<IState>[] = useMemo(
-        () => country
-            ? State.getStatesOfCountry(country.isoCode).map(s => ({ value: s.isoCode, label: s.name, raw: s }))
-            : [],
+        () =>
+            country
+                ? State.getStatesOfCountry(country.isoCode).map(s => ({ value: s.isoCode, label: s.name, raw: s }))
+                : [],
         [country]
     );
 
     const cities: Option<ICity>[] = useMemo(
-        () => (country && state)
-            ? City.getCitiesOfState(country.isoCode, state.isoCode).map(ct => ({ value: ct.name, label: ct.name, raw: ct }))
-            : [],
+        () =>
+            country && state
+                ? City.getCitiesOfState(country.isoCode, state.isoCode).map(ct => ({ value: ct.name, label: ct.name, raw: ct }))
+                : [],
         [country, state]
     );
 
-    // Build the string for your API
-    const emit = (c: ICountry | null, s: IState | null, ct: ICity | null) => {
+    const emit = useCallback((c: ICountry | null, s: IState | null, ct: ICity | null) => {
         if (!c) { onChange(''); return; }
-        let str = c.isoCode;                // e.g. 'US'
-        if (s)  str += `:${s.isoCode}`;     // e.g. 'US:CA'
-        if (ct) str += `:${ct.name}`;       // e.g. 'US:CA:San Francisco'
+        let str = c.isoCode;            // e.g. 'US'
+        if (s)  str += `:${s.isoCode}`; // e.g. 'US:CA'
+        if (ct) str += `:${ct.name}`;   // e.g. 'US:CA:San Francisco'
         onChange(str);
-    };
+    }, [onChange]);
 
     return (
         <div className={className}>
@@ -58,12 +59,12 @@ export default function LocationPicker({
                 <Select<Option<ICountry>, false>
                     options={countries}
                     value={country ? { value: country.isoCode, label: country.name, raw: country } : null}
-                    onChange={(opt) => {
+                    onChange={(opt: SingleValue<Option<ICountry>>) => {
                         const c = opt ? Country.getCountryByCode(opt.value) : null;
-                        setCountry(c);
+                        setCountry(c);                 // never undefined
                         setState(null);
                         setCity(null);
-                        emit(c, null, null); // <- IMPORTANT: emit immediately on country pick
+                        emit(c, null, null);
                     }}
                     isClearable
                     placeholder={placeholderCountry}
@@ -73,9 +74,9 @@ export default function LocationPicker({
                 <Select<Option<IState>, false>
                     options={states}
                     value={state ? { value: state.isoCode, label: state.name, raw: state } : null}
-                    onChange={(opt) => {
+                    onChange={(opt: SingleValue<Option<IState>>) => {
                         const s = opt && country ? State.getStateByCodeAndCountry(opt.value, country.isoCode) : null;
-                        setState(s);
+                        setState(s);                   // never undefined
                         setCity(null);
                         emit(country, s, null);
                     }}
@@ -88,9 +89,9 @@ export default function LocationPicker({
                 <Select<Option<ICity>, false>
                     options={cities}
                     value={city ? { value: city.name, label: city.name, raw: city } : null}
-                    onChange={(opt) => {
-                        const ct = opt ? (opt.raw as ICity) : null;
-                        setCity(ct);
+                    onChange={(opt: SingleValue<Option<ICity>>) => {
+                        const ct = opt ? opt.raw : null;
+                        setCity(ct);                   // never undefined
                         emit(country, state, ct);
                     }}
                     isClearable

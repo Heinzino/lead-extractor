@@ -138,6 +138,11 @@ export default function ContactFinder() {
       setToastType('error');
       setShowToast(true);
       return;
+    } else if (!pageSize || pageSize < 1) {
+      setToastMessage('Page size must be at least 1');
+      setToastType('error');
+      setShowToast(true);
+      return;
     }
 
     try {
