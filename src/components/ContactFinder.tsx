@@ -8,6 +8,24 @@ import YouTubeModal from './YouTubeModal';
 import LocationPicker from './LocationPicker';
 import { supabase } from '../lib/supabase/supabaseClient';
 
+async function uploadCsvAndGetSignedUrl(file: File, userId: string) {
+  const bucket = 'php-csv-uploads';
+  const path = `uploads/${userId}/${Date.now()}-${file.name}`;
+
+  const up = await supabase.storage.from(bucket).upload(path, file, {
+    cacheControl: '3600',
+    upsert: false,
+    contentType: file.type || 'text/csv',
+  });
+  if (up.error) throw up.error;
+
+  const signed = await supabase.storage.from(bucket).createSignedUrl(path, 60 * 60);
+  if (signed.error || !signed.data?.signedUrl) {
+    throw signed.error || new Error('Could not create signed URL');
+  }
+  return signed.data.signedUrl;
+}
+
 export default function ContactFinder() {
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -47,13 +65,12 @@ export default function ContactFinder() {
     setToastType('success');
     setShowToast(true);
 
-    // Parse headers with Papa Parse (reads only header row / one record)
     Papa.parse(uploadedFile, {
       header: true,
-      preview: 1,          // only need first row to get headers
+      preview: 1,
       skipEmptyLines: true,
       complete: (results) => {
-        // Prefer meta.fields (headers). Fallback to keys of first data row
+
         const detected =
             (results.meta?.fields as string[] | undefined)?.filter(Boolean) ??
             (results.data && results.data[0] ? Object.keys(results.data[0] as object) : []);
@@ -61,7 +78,6 @@ export default function ContactFinder() {
 
         setHeaders(uniqueHeaders);
 
-        // Try to auto-guess selections
         const guess = (needle: RegExp) =>
             uniqueHeaders.find((h) => needle.test(h.toLowerCase())) || '';
         setWebsiteColumn((prev) => prev || guess(/\b(url|website|site|domain)\b/));
@@ -115,34 +131,22 @@ export default function ContactFinder() {
     e.preventDefault();
     if (!file) {
       setToastMessage('Please upload a file');
-      setToastType('error');
-      setShowToast(true);
-      return;
+      setToastType('error'); setShowToast(true); return;
     } else if (!jobTitles) {
       setToastMessage('Please enter the job titles you want to search for');
-      setToastType('error');
-      setShowToast(true);
-      return;
+      setToastType('error'); setShowToast(true); return;
     } else if (!fileName) {
       setToastMessage('Please enter a name for your file');
-      setToastType('error');
-      setShowToast(true);
-      return;
+      setToastType('error'); setShowToast(true); return;
     } else if (!mappingReady) {
       setToastMessage('Please select which columns are Website and Company Name');
-      setToastType('error');
-      setShowToast(true);
-      return;
+      setToastType('error'); setShowToast(true); return;
     } else if (!locationReady) {
       setToastMessage('Please either map a Location column or pick a location.');
-      setToastType('error');
-      setShowToast(true);
-      return;
+      setToastType('error'); setShowToast(true); return;
     } else if (!pageSize || pageSize < 1) {
       setToastMessage('Page size must be at least 1');
-      setToastType('error');
-      setShowToast(true);
-      return;
+      setToastType('error'); setShowToast(true); return;
     }
 
     try {
@@ -151,33 +155,31 @@ export default function ContactFinder() {
       setToastType('success');
       setShowToast(true);
 
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('jobTitles', jobTitles);
-      formData.append('fileName', fileName);
-
-      formData.append('websiteColumn', websiteColumn);
-      formData.append('companyColumn', companyColumn);
-
-      if (locationColumn) formData.append('locationColumn', locationColumn);
-      if (companyLocation) formData.append('companyLocation', companyLocation);
-
-      if (excludeTitles) formData.append('excludeTitles', excludeTitles);
-      formData.append('useVariants', useVariants ? '1' : '0');
-      formData.append('useAiVariants', useAiVariants ? '1' : '0');
-      formData.append('pageSize', String(Math.min(200, Math.max(1, pageSize))));
-
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        throw new Error('You must be logged in to use this feature');
-      }
-      formData.append('userId', user.id);
+      if (!user) throw new Error('You must be logged in to use this feature');
+
+      const fileUrl = await uploadCsvAndGetSignedUrl(file, user.id);
 
       const API_BASE_URL = process.env.NEXT_PUBLIC_LARAVEL_API_BASE_URL!;
+      const payload = {
+        fileUrl,
+        jobTitles,
+        fileName,
+        websiteColumn,
+        companyColumn,
+        locationColumn: locationColumn || null,
+        companyLocation,
+        excludeTitles,
+        useVariants,
+        useAiVariants,
+        pageSize: Math.min(200, Math.max(1, pageSize)),
+        userId: user.id,
+      };
 
       const response = await fetch(`${API_BASE_URL}`, {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {

@@ -1,0 +1,43 @@
+-- INSERT: allow putting objects under uploads/<uid>/...
+create policy "storage-insert-own-csvs"
+on storage.objects
+for insert
+to authenticated
+with check (
+  bucket_id = 'php-csv-uploads'
+  and position('uploads/' || auth.uid() || '/' in name) = 1
+);
+
+-- SELECT: required for createSignedUrl and listing your own files
+create policy "storage-select-own-csvs"
+on storage.objects
+for select
+to authenticated
+using (
+  bucket_id = 'php-csv-uploads'
+  and position('uploads/' || auth.uid() || '/' in name) = 1
+);
+
+-- UPDATE (optional): allow user to modify their own files
+create policy "storage-update-own-csvs"
+on storage.objects
+for update
+to authenticated
+using (
+  bucket_id = 'php-csv-uploads'
+  and position('uploads/' || auth.uid() || '/' in name) = 1
+)
+with check (
+  bucket_id = 'php-csv-uploads'
+  and position('uploads/' || auth.uid() || '/' in name) = 1
+);
+
+-- DELETE (optional): allow user to delete their own files
+create policy "storage-delete-own-csvs"
+on storage.objects
+for delete
+to authenticated
+using (
+  bucket_id = 'php-csv-uploads'
+  and position('uploads/' || auth.uid() || '/' in name) = 1
+);
