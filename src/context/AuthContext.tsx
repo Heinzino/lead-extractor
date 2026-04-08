@@ -13,11 +13,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      // Demo mode: fake user so the UI renders without Supabase
+      setUser({ id: 'demo-user', email: 'demo@example.com' } as User);
+      setLoading(false);
+      return;
+    }
+
     supabase.auth.getSession().then(({ data }) => {
       setUser(data.session?.user ?? null);
-      setLoading(false); 
+      setLoading(false);
     });
-
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
