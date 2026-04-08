@@ -67,9 +67,7 @@ export default function FileUploaderBox({
                            !!rowData.zip;
               break;
             case 'businesses':
-              // Only check that the row has some non-empty values.
-              // Column mapping is handled by FieldMapper after upload.
-              isValidRow = values.some(v => hasMeaningfulContent(v || ''));
+              isValidRow = hasMeaningfulContent(rowData.company || '') && !!rowData.website;
               break;
           }
           if (isValidRow) validRowCount++;
@@ -149,7 +147,7 @@ export default function FileUploaderBox({
     return (
         <div
         className={`
-          relative border-2 border-dashed rounded-xl p-8
+          relative border-2 border-dashed rounded-xl p-18
           flex flex-col items-center justify-center text-center
           cursor-pointer bg-gray-200 hover:bg-gray-100 transition-all duration-200
           ${isDragging ? 'border-blue-400 bg-blue-50' : ''}
@@ -168,10 +166,10 @@ export default function FileUploaderBox({
           </div>
         ) : (
           <>
-            <p className="text-lg font-bold mb-2">{getTitle()}</p>
-            <div className="bg-white rounded-full p-2.5 mb-2">
-              <Upload
-                className="w-8 h-8 text-accentBlue"
+            <p className="text-2xl font-bold mb-4">{getTitle()}</p>
+            <div className="bg-white rounded-full p-3 mb-4">
+              <Upload 
+                className="w-10 h-10 text-accentBlue" 
                 strokeWidth={1.5}
               />
             </div>
