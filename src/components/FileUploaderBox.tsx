@@ -14,17 +14,19 @@ interface FileValidationSuccess {
 type FileValidationResult = FileValidationError | FileValidationSuccess;
 
 export default function FileUploaderBox({
-  handleFileUpload, 
-  isUploading, 
-  file, 
+  handleFileUpload,
+  isUploading,
+  file,
   type,
-  onValidationError
+  onValidationError,
+  compact = false,
 }: {
-  handleFileUpload: (file: File, type: 'cities' | 'queries' | 'businesses' | 'combined') => void, 
-  isUploading: boolean, 
-  file: File | null, 
+  handleFileUpload: (file: File, type: 'cities' | 'queries' | 'businesses' | 'combined') => void,
+  isUploading: boolean,
+  file: File | null,
   type: 'cities' | 'queries' | 'businesses' | 'combined',
-  onValidationError: (error: string) => void
+  onValidationError: (error: string) => void,
+  compact?: boolean,
 }) {
     const [isDragging, setIsDragging] = useState(false);
     const [validationError, setValidationError] = useState<string | null>(null);
@@ -149,7 +151,7 @@ export default function FileUploaderBox({
     return (
         <div
         className={`
-          relative border-2 border-dashed rounded-xl p-8
+          relative border-2 border-dashed rounded-xl ${compact ? 'p-8' : 'p-18'}
           flex flex-col items-center justify-center text-center
           cursor-pointer bg-gray-200 hover:bg-gray-100 transition-all duration-200
           ${isDragging ? 'border-blue-400 bg-blue-50' : ''}
@@ -168,10 +170,10 @@ export default function FileUploaderBox({
           </div>
         ) : (
           <>
-            <p className="text-lg font-bold mb-2">{getTitle()}</p>
-            <div className="bg-white rounded-full p-2.5 mb-2">
+            <p className={`${compact ? 'text-lg' : 'text-2xl'} font-bold ${compact ? 'mb-2' : 'mb-4'}`}>{getTitle()}</p>
+            <div className={`bg-white rounded-full ${compact ? 'p-2.5 mb-2' : 'p-3 mb-4'}`}>
               <Upload
-                className="w-8 h-8 text-accentBlue"
+                className={`${compact ? 'w-8 h-8' : 'w-10 h-10'} text-accentBlue`}
                 strokeWidth={1.5}
               />
             </div>

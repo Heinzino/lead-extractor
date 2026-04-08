@@ -236,6 +236,7 @@ export default function ContactFinder() {
               file={file}
               type={'businesses'}
               onValidationError={handleValidationError}
+              compact
             />
           ) : (
             <div className="bg-white p-3 rounded-xl border border-green-300 shadow-sm">

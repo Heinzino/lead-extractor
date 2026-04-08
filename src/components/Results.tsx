@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Clock, CheckCircle, XCircle, Download, ChevronDown, ChevronUp } from 'lucide-react';
 import { supabase } from '../lib/supabase/supabaseClient';
@@ -54,16 +54,58 @@ interface BatchStatus {
   };
 }
 
-type Result = (SerperResult & { type: 'serper' }) | (EnrichResult & { type: 'enrich'; batchStatus?: BatchStatus });
+type EnrichResultWithBatch = EnrichResult & { type: 'enrich'; batchStatus?: BatchStatus };
+type SerperResultWithType = SerperResult & { type: 'serper' };
+type Result = SerperResultWithType | EnrichResultWithBatch;
 
 export default function Results() {
-  const [results, setResults] = useState<Result[]>([]);
+  const [serperResults, setSerperResults] = useState<SerperResultWithType[]>([]);
+  const [enrichResults, setEnrichResults] = useState<EnrichResultWithBatch[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'error' | 'success'>('success');
   const searchParams = useSearchParams();
 
+  const results = useMemo<Result[]>(() => {
+    return [...serperResults, ...enrichResults]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }, [serperResults, enrichResults]);
+
+  // --- Serper (Business Finder) fetch: always Supabase, original behavior ---
+  const fetchSerperResults = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from('serper_results')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching Serper results:', error);
+      return;
+    }
+
+    setSerperResults(
+      (data || []).map(r => {
+        const result = r as unknown as SerperResult;
+        return {
+          ...result,
+          type: 'serper' as const,
+          status: result.status as 'RUNNING' | 'DONE' | 'ERROR',
+          result_count: result.result_count ?? undefined,
+          credits_used: result.credits_used ?? undefined,
+          file_size: result.file_size ?? undefined,
+          file_url: result.file_url ?? undefined,
+          error_message: result.error_message ?? undefined,
+        };
+      })
+    );
+  }, []);
+
+  // --- Enrich (Contact Finder) fetch: smart polling with batch status ---
   const fetchBatchStatus = useCallback(async (batchId: string): Promise<BatchStatus | undefined> => {
     try {
       const res = await fetch(`/api/matching/${batchId}`);
@@ -74,44 +116,32 @@ export default function Results() {
     }
   }, []);
 
-  const fetchResults = useCallback(async () => {
-    let enrichWithStatus: Result[] = [];
-    let serperData: SerperResult[] = [];
+  const fetchEnrichResults = useCallback(async (): Promise<boolean> => {
+    let enrichWithStatus: EnrichResultWithBatch[] = [];
 
     if (HAS_SUPABASE) {
-      // Production: fetch from Supabase
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return true;
+      if (!user) return false;
 
-      const [serperResults, enrichResults] = await Promise.all([
-        supabase
-          .from('serper_results')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('enrich_results')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-      ]);
+      const { data, error } = await supabase
+        .from('enrich_results')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
 
-      if (serperResults.error || enrichResults.error) return true;
-      serperData = (serperResults.data || []) as unknown as SerperResult[];
+      if (error) return false;
 
       enrichWithStatus = await Promise.all(
-        (enrichResults.data || []).map(async (r) => {
+        (data || []).map(async (r) => {
           const result = r as unknown as EnrichResult;
-          const enrichItem: Result = {
+          const enrichItem: EnrichResultWithBatch = {
             ...result,
             type: 'enrich' as const,
             status: result.status as 'RUNNING' | 'DONE' | 'ERROR',
           };
-          // Always fetch batch status for stats display
           const batchStatus = await fetchBatchStatus(result.id);
           if (batchStatus) {
-            (enrichItem as EnrichResult & { type: 'enrich'; batchStatus?: BatchStatus }).batchStatus = batchStatus;
-            // Handle status transitions for running batches
+            enrichItem.batchStatus = batchStatus;
             if (result.status === 'RUNNING') {
               if (batchStatus.status === 'COMPLETED') {
                 enrichItem.status = 'DONE';
@@ -130,26 +160,23 @@ export default function Results() {
         })
       );
     } else {
-      // Local/demo: read batch_ids from localStorage, poll AWS API
       const stored = JSON.parse(localStorage.getItem('matching_batches') || '[]') as {
         batch_id: string; file_name: string; created_at: string; status?: string;
       }[];
 
       enrichWithStatus = await Promise.all(
         stored.map(async (s) => {
-          // Always fetch batch status for stats display
           const batchStatus = await fetchBatchStatus(s.batch_id);
           const status = s.status === 'DONE' || s.status === 'ERROR'
             ? s.status
             : batchStatus?.status === 'COMPLETED' ? 'DONE'
               : batchStatus?.status === 'FAILED' ? 'ERROR' : 'RUNNING';
 
-          // Persist terminal status
           if ((status === 'DONE' || status === 'ERROR') && s.status !== status) {
             s.status = status;
           }
 
-          const item: Result = {
+          const item: EnrichResultWithBatch = {
             id: s.batch_id,
             user_id: 'local',
             file_name: s.file_name,
@@ -160,27 +187,20 @@ export default function Results() {
             type: 'enrich' as const,
           };
           if (batchStatus) {
-            (item as EnrichResult & { type: 'enrich'; batchStatus?: BatchStatus }).batchStatus = batchStatus;
+            item.batchStatus = batchStatus;
           }
           return item;
         })
       );
 
-      // Write updated statuses back to localStorage
       localStorage.setItem('matching_batches', JSON.stringify(stored));
     }
 
-    const combinedResults: Result[] = [
-      ...serperData.map(result => {
-        return { ...result, type: 'serper' as const };
-      }),
-      ...enrichWithStatus,
-    ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-    setResults(combinedResults);
-    return combinedResults.some(r => r.status === 'RUNNING');
+    setEnrichResults(enrichWithStatus);
+    return enrichWithStatus.some(r => r.status === 'RUNNING');
   }, [fetchBatchStatus]);
 
+  // --- Toast / URL cleanup ---
   useEffect(() => {
     const status = searchParams?.get('status');
     if (status === 'processing') {
@@ -195,18 +215,28 @@ export default function Results() {
         window.history.replaceState({}, '', url);
       }, 0);
     }
+  }, [searchParams]);
 
+  // --- Serper polling: setInterval, runs forever (original behavior) ---
+  useEffect(() => {
+    fetchSerperResults();
+    const interval = setInterval(fetchSerperResults, 5000);
+    return () => clearInterval(interval);
+  }, [fetchSerperResults]);
+
+  // --- Enrich polling: smart recursive setTimeout, stops when all terminal ---
+  useEffect(() => {
     let cancelled = false;
     const poll = async () => {
       if (cancelled) return;
-      const hasRunning = await fetchResults();
+      const hasRunning = await fetchEnrichResults();
       if (hasRunning && !cancelled) {
         setTimeout(poll, 5000);
       }
     };
     poll();
     return () => { cancelled = true; };
-  }, [searchParams, fetchResults]);
+  }, [fetchEnrichResults]);
 
   const getStatusIcon = (status: Result['status']) => {
     switch (status) {
@@ -240,24 +270,20 @@ export default function Results() {
     window.URL.revokeObjectURL(url);
   };
 
-  const handleDownload = async (result: Result) => {
+  const handleEnrichDownload = async (result: EnrichResultWithBatch) => {
     try {
       const fileName = `${result.file_name}.csv`;
 
-      if (result.type === 'enrich' && !result.file_url) {
-        // For matching pipeline batches, proxy file through our API to avoid S3 CORS issues
+      if (!result.file_url) {
         const res = await fetch(`/api/matching/${result.id}/download?filename=${encodeURIComponent(fileName)}`);
         if (!res.ok) throw new Error('Download not ready');
         const blob = await res.blob();
         downloadBlob(blob, fileName);
         return;
       }
-      // Fallback: use Supabase file_url
-      if (result.file_url) {
-        const response = await fetch(result.file_url);
-        const blob = await response.blob();
-        downloadBlob(blob, fileName);
-      }
+      const response = await fetch(result.file_url);
+      const blob = await response.blob();
+      downloadBlob(blob, fileName);
     } catch (error) {
       console.error('Error downloading file:', error);
       setToastMessage('Error downloading file');
@@ -375,6 +401,130 @@ export default function Results() {
     );
   };
 
+  // --- Serper result card: original main behavior ---
+  const renderSerperResult = (result: SerperResultWithType) => (
+    <div key={`serper-${result.id}`} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          <div className="bg-blue-50 p-2 rounded-lg">
+            {getStatusIcon(result.status)}
+          </div>
+          <div>
+            <p className="text-sm text-gray-800">
+              {result.file_name}
+              <span className="ml-2 text-xs text-gray-500">(Business Finder)</span>
+            </p>
+            <p className="text-xs text-gray-500">
+              {new Date(result.created_at).toLocaleString()}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-4">
+          {result.status === 'DONE' && (
+            <>
+              {result.result_count === 0 ? (
+                <div className="text-sm text-gray-500">
+                  <p>No results found. Try expanding your query.</p>
+                </div>
+              ) : (
+                <>
+                  <div className="text-sm text-gray-500 space-y-1">
+                    <p>Results: {result.result_count}</p>
+                    {'credits_used' in result && (
+                      <p>Credits: {result.credits_used}</p>
+                    )}
+                    <p>Size: {formatFileSize(result.file_size)}</p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const response = await fetch(result.file_url!);
+                        const blob = await response.blob();
+                        downloadBlob(blob, `${result.file_name}.csv`);
+                      } catch (error) {
+                        console.error('Error downloading file:', error);
+                        setToastMessage('Error downloading file');
+                        setToastType('error');
+                        setShowToast(true);
+                      }
+                    }}
+                    className="p-2 text-gray-500 hover:text-accentBlue hover:cursor-pointer transition-colors rounded-full hover:border"
+                  >
+                    <Download className="w-5 h-5" />
+                  </button>
+                </>
+              )}
+            </>
+          )}
+          {result.status === 'ERROR' && (
+            <span className="text-sm text-red-500">{result.error_message}</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  // --- Enrich result card: new Contact Finder behavior ---
+  const renderEnrichResult = (result: EnrichResultWithBatch) => {
+    const batchStatus = result.batchStatus;
+    const isProcessing = result.status === 'RUNNING';
+    const canDownload = result.status === 'DONE' || (isProcessing && batchStatus && ['ENRICHING', 'COMPLETED'].includes(batchStatus.status));
+
+    return (
+      <div key={`enrich-${result.id}`} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="bg-blue-50 p-2 rounded-lg">
+              {getStatusIcon(result.status)}
+            </div>
+            <div>
+              <p className="text-sm text-gray-800">
+                {result.file_name}
+                <span className="ml-2 text-xs text-gray-500">(Contact Finder)</span>
+              </p>
+              <p className="text-xs text-gray-500">
+                {new Date(result.created_at).toLocaleString()}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-4">
+            {(result.status === 'DONE' || canDownload) && (
+              <>
+                {result.result_count === 0 && result.status === 'DONE' ? (
+                  <div className="text-sm text-gray-500">
+                    <p>No results found.</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-sm text-gray-500 space-y-1">
+                      {result.result_count != null && <p>Results: {result.result_count}</p>}
+                      {result.file_size != null && <p>Size: {formatFileSize(result.file_size)}</p>}
+                    </div>
+                    <button
+                      onClick={() => handleEnrichDownload(result)}
+                      className="p-2 text-gray-500 hover:text-accentBlue hover:cursor-pointer transition-colors rounded-full hover:border"
+                    >
+                      <Download className="w-5 h-5" />
+                    </button>
+                  </>
+                )}
+              </>
+            )}
+            {result.status === 'ERROR' && (
+              <span className="text-sm text-red-500">
+                {result.error_message}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {batchStatus && renderBatchInfo(batchStatus, isProcessing, result.id)}
+      </div>
+    );
+  };
+
   return (
     <div className="w-full mx-auto p-4 md:px-6 md:pt-4 md:pb-24">
       {showToast && (
@@ -396,67 +546,11 @@ export default function Results() {
 
       <div className="space-y-4">
         {results.map((result) => {
-          const batchStatus = result.type === 'enrich' ? (result as EnrichResult & { type: 'enrich'; batchStatus?: BatchStatus }).batchStatus : undefined;
-          const isProcessing = result.status === 'RUNNING';
-          const canDownload = result.status === 'DONE' || (isProcessing && batchStatus && ['ENRICHING', 'COMPLETED'].includes(batchStatus.status));
-
-          return (
-            <div key={`${result.type}-${result.id}`} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <div className="bg-blue-50 p-2 rounded-lg">
-                    {getStatusIcon(result.status)}
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-800">
-                      {result.file_name}
-                      <span className="ml-2 text-xs text-gray-500">
-                        ({result.type === 'serper' ? 'Business Finder' : 'Contact Finder'})
-                      </span>
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {new Date(result.created_at).toLocaleString()}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center space-x-4">
-                  {(result.status === 'DONE' || canDownload) && (
-                    <>
-                      {result.result_count === 0 && result.status === 'DONE' ? (
-                        <div className="text-sm text-gray-500">
-                          <p>No results found.</p>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="text-sm text-gray-500 space-y-1">
-                            {result.result_count != null && <p>Results: {result.result_count}</p>}
-                            {result.type === 'serper' && 'credits_used' in result && (
-                              <p>Credits: {result.credits_used}</p>
-                            )}
-                            {result.file_size != null && <p>Size: {formatFileSize(result.file_size)}</p>}
-                          </div>
-                          <button
-                            onClick={() => handleDownload(result)}
-                            className="p-2 text-gray-500 hover:text-accentBlue hover:cursor-pointer transition-colors rounded-full hover:border"
-                          >
-                            <Download className="w-5 h-5" />
-                          </button>
-                        </>
-                      )}
-                    </>
-                  )}
-                  {result.status === 'ERROR' && (
-                    <span className="text-sm text-red-500">
-                      {result.error_message}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {batchStatus && renderBatchInfo(batchStatus, isProcessing, result.id)}
-            </div>
-          );
+          if (result.type === 'serper') {
+            return renderSerperResult(result);
+          } else {
+            return renderEnrichResult(result);
+          }
         })}
         {results.length === 0 && (
           <div className="text-center text-gray-500 py-8">
