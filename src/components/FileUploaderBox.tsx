@@ -14,17 +14,19 @@ interface FileValidationSuccess {
 type FileValidationResult = FileValidationError | FileValidationSuccess;
 
 export default function FileUploaderBox({
-  handleFileUpload, 
-  isUploading, 
-  file, 
+  handleFileUpload,
+  isUploading,
+  file,
   type,
-  onValidationError
+  onValidationError,
+  compact = false,
 }: {
-  handleFileUpload: (file: File, type: 'cities' | 'queries' | 'businesses' | 'combined') => void, 
-  isUploading: boolean, 
-  file: File | null, 
+  handleFileUpload: (file: File, type: 'cities' | 'queries' | 'businesses' | 'combined') => void,
+  isUploading: boolean,
+  file: File | null,
   type: 'cities' | 'queries' | 'businesses' | 'combined',
-  onValidationError: (error: string) => void
+  onValidationError: (error: string) => void,
+  compact?: boolean,
 }) {
     const [isDragging, setIsDragging] = useState(false);
     const [validationError, setValidationError] = useState<string | null>(null);
@@ -67,7 +69,9 @@ export default function FileUploaderBox({
                            !!rowData.zip;
               break;
             case 'businesses':
-              isValidRow = hasMeaningfulContent(rowData.company || '') && !!rowData.website;
+              // Only check that the row has some non-empty values.
+              // Column mapping is handled by FieldMapper after upload.
+              isValidRow = values.some(v => hasMeaningfulContent(v || ''));
               break;
           }
           if (isValidRow) validRowCount++;
@@ -147,7 +151,7 @@ export default function FileUploaderBox({
     return (
         <div
         className={`
-          relative border-2 border-dashed rounded-xl p-18
+          relative border-2 border-dashed rounded-xl ${compact ? 'p-8' : 'p-18'}
           flex flex-col items-center justify-center text-center
           cursor-pointer bg-gray-200 hover:bg-gray-100 transition-all duration-200
           ${isDragging ? 'border-blue-400 bg-blue-50' : ''}
@@ -166,10 +170,10 @@ export default function FileUploaderBox({
           </div>
         ) : (
           <>
-            <p className="text-2xl font-bold mb-4">{getTitle()}</p>
-            <div className="bg-white rounded-full p-3 mb-4">
-              <Upload 
-                className="w-10 h-10 text-accentBlue" 
+            <p className={`${compact ? 'text-lg' : 'text-2xl'} font-bold ${compact ? 'mb-2' : 'mb-4'}`}>{getTitle()}</p>
+            <div className={`bg-white rounded-full ${compact ? 'p-2.5 mb-2' : 'p-3 mb-4'}`}>
+              <Upload
+                className={`${compact ? 'w-8 h-8' : 'w-10 h-10'} text-accentBlue`}
                 strokeWidth={1.5}
               />
             </div>
