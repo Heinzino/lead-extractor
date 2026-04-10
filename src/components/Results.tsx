@@ -33,6 +33,23 @@ interface EnrichResult {
   updated_at: string;
 }
 
+interface EnrichmentStage {
+  stage: number;
+  name: string;
+  status: 'completed' | 'in_progress' | 'pending';
+  enriched?: number;
+  emails_found?: number;
+  findymail_credits?: number;
+  wiza_credits?: number;
+  items_skipped?: number;
+  skip_buckets?: {
+    skip_only_pn?: number;
+    skip_only_dom?: number;
+    skip_both?: number;
+    skip_only_lin?: number;
+  };
+}
+
 interface BatchStatus {
   batch_id: string;
   status: string;
@@ -51,6 +68,8 @@ interface BatchStatus {
     emails_found: number;
     findymail_credits: number;
     wiza_credits: number;
+    current_stage?: number;
+    stages?: EnrichmentStage[];
   };
 }
 
@@ -249,6 +268,17 @@ export default function Results() {
     }
   };
 
+  const getStageStatusIcon = (status: EnrichmentStage['status']) => {
+    switch (status) {
+      case 'completed':
+        return <CheckCircle className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />;
+      case 'in_progress':
+        return <Clock className="w-3.5 h-3.5 text-blue-500 animate-spin flex-shrink-0" />;
+      case 'pending':
+        return <div className="w-3.5 h-3.5 rounded-full border-2 border-gray-300 flex-shrink-0" />;
+    }
+  };
+
   const formatFileSize = (bytes: number | undefined | null) => {
     if (!bytes) return '0 B';
     const k = 1024;
@@ -311,6 +341,13 @@ export default function Results() {
     });
   };
 
+  const getEnrichmentProgress = (enrichment: BatchStatus['enrichment']): number => {
+    if (!enrichment?.stages) return 0;
+    const completed = enrichment.stages.filter(s => s.status === 'completed').length;
+    const hasInProgress = enrichment.stages.some(s => s.status === 'in_progress');
+    return Math.min(100, ((completed + (hasInProgress ? 0.5 : 0)) / 4) * 100);
+  };
+
   const renderBatchInfo = (batchStatus: BatchStatus, isProcessing: boolean, resultId: string) => {
     const matching = batchStatus.matching;
     const enrichment = batchStatus.enrichment;
@@ -359,17 +396,74 @@ export default function Results() {
         {enrichment && enrichment.total > 0 && (
           <div>
             <div className="flex justify-between text-xs text-gray-500 mb-1">
-              <span>Email Enrichment {isComplete ? '✓' : '...'}</span>
+              <span>
+                Email Enrichment{' '}
+                {isComplete
+                  ? '✓'
+                  : enrichment.current_stage
+                    ? `(Stage ${enrichment.current_stage}/4)`
+                    : '...'}
+              </span>
               <span>{enrichment.emails_found} emails found</span>
             </div>
             {isProcessing && !isComplete && (
               <div className="w-full bg-gray-200 rounded-full h-2">
                 <div
                   className="bg-green-500 h-2 rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(100, (enrichment.enriched / enrichment.total) * 100)}%` }}
+                  style={{ width: `${getEnrichmentProgress(enrichment)}%` }}
                 />
               </div>
             )}
+
+            {/* Per-stage breakdown */}
+            {enrichment.stages && enrichment.stages.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {enrichment.stages.map((stage) => {
+                  const skipLabels: Record<string, string> = {
+                    skip_only_dom: 'missing company domain',
+                    skip_only_pn: 'missing person name',
+                    skip_both: 'missing both',
+                    skip_only_lin: 'missing LinkedIn URL',
+                  };
+                  const bucketEntries = stage.skip_buckets
+                    ? (Object.entries(stage.skip_buckets) as [string, number | undefined][])
+                        .filter(([, v]) => (v ?? 0) > 0)
+                        .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
+                    : [];
+                  // For single-field stages (only skip_only_lin), the breakdown duplicates the total — hide it
+                  const showBreakdown =
+                    (stage.items_skipped ?? 0) > 0 &&
+                    bucketEntries.length > 0 &&
+                    !(bucketEntries.length === 1 && bucketEntries[0][0] === 'skip_only_lin');
+                  return (
+                    <div key={stage.stage}>
+                      <div className="flex items-center gap-2 text-xs">
+                        {getStageStatusIcon(stage.status)}
+                        <span className={`w-44 flex-shrink-0 ${stage.status === 'pending' ? 'text-gray-400' : 'text-gray-600'}`}>
+                          {stage.name}
+                        </span>
+                        {stage.status !== 'pending' && (
+                          <span className="text-gray-400">
+                            {(stage.enriched ?? 0).toLocaleString()} processed · {(stage.emails_found ?? 0).toLocaleString()} emails
+                            {(stage.findymail_credits ?? 0) > 0 && ` · ${(stage.findymail_credits ?? 0).toLocaleString()} FM credits`}
+                            {(stage.wiza_credits ?? 0) > 0 && ` · ${(stage.wiza_credits ?? 0).toLocaleString()} Wiza credits`}
+                            <span className={(stage.items_skipped ?? 0) > 0 ? 'text-amber-500' : 'text-gray-400'}>
+                              {' '}· {(stage.items_skipped ?? 0).toLocaleString()} skipped
+                            </span>
+                          </span>
+                        )}
+                      </div>
+                      {showBreakdown && (
+                        <div className="ml-12 text-xs text-amber-500/80">
+                          ↳ {bucketEntries.map(([k, v]) => `${(v ?? 0).toLocaleString()} ${skipLabels[k]}`).join(' · ')}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="flex gap-3 text-xs text-gray-400 mt-1">
               <span>Findymail: {enrichment.findymail_credits} credits</span>
               <span>Wiza: {enrichment.wiza_credits} credits</span>

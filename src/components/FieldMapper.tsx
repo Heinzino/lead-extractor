@@ -7,7 +7,6 @@ interface FieldMapperProps {
 }
 
 const REQUIRED_FIELDS = [
-  { key: 'cid', label: 'Google Maps ID (CID)', aliases: ['cid', 'place_id', 'placeid', 'google_id', 'id'] },
   { key: 'title', label: 'Company Name', aliases: ['title', 'name', 'company', 'company_name', 'business_name', 'business'] },
   { key: 'website', label: 'Website', aliases: ['website', 'url', 'site', 'web', 'website_url', 'domain'] },
 ];
