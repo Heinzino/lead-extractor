@@ -61,7 +61,9 @@ export type Database = {
         Row: {
           id: string
           user_id: string
+          file_name: string
           status: string
+          mode?: string
           error_message?: string
           file_url?: string
           result_count?: number
@@ -72,7 +74,9 @@ export type Database = {
         Insert: {
           id?: string
           user_id: string
+          file_name: string
           status: string
+          mode?: string
           error_message?: string
           file_url?: string
           result_count?: number
@@ -83,7 +87,9 @@ export type Database = {
         Update: {
           id?: string
           user_id?: string
+          file_name?: string
           status?: string
+          mode?: string
           error_message?: string
           file_url?: string
           result_count?: number

@@ -6,6 +6,10 @@ import FileUploaderBox from './FileUploaderBox';
 import FieldMapper from './FieldMapper';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase/supabaseClient';
+import { MATCHING_FIELDS, ENRICHMENT_FIELDS } from '../lib/fieldConfigs';
+import { transformEnrichmentCsv } from '../lib/csvTransform';
+
+type ContactFinderMode = 'match_and_enrich' | 'enrich_only';
 
 const HAS_SUPABASE = !!process.env.NEXT_PUBLIC_SUPABASE_URL;
 
@@ -18,6 +22,7 @@ function saveBatchToLocalStorage(batch: { batch_id: string; file_name: string; c
 
 export default function ContactFinder() {
   const { user } = useAuth();
+  const [mode, setMode] = useState<ContactFinderMode>('match_and_enrich');
   const [file, setFile] = useState<File | null>(null);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string> | null>(null);
@@ -30,6 +35,23 @@ export default function ContactFinder() {
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'error' | 'success'>('success');
   const [hasUploadError, setHasUploadError] = useState(false);
+
+  // Tab switch resets all upload state so a half-mapped file from one mode
+  // doesn't leak into the other.
+  const switchMode = useCallback((next: ContactFinderMode) => {
+    if (next === mode) return;
+    if (isSubmitting) return; // tab buttons are also disabled in JSX, but guard here too
+    setMode(next);
+    setFile(null);
+    setCsvHeaders([]);
+    setFieldMapping(null);
+    setJobTitles('');
+    setEnrichEmails(false);
+    setFileName('');
+    setHasUploadError(false);
+    setIsSubmitting(false);
+    setShowToast(false);
+  }, [mode, isSubmitting]);
 
   const handleFileUpload = useCallback(async (uploadedFile: File) => {
     if (!uploadedFile.name.endsWith('.csv')) {
@@ -92,10 +114,15 @@ export default function ContactFinder() {
 
   const downloadSampleFile = useCallback(() => {
     const link = document.createElement('a');
-    link.href = '/sample-cf-input.csv';
-    link.download = 'sample-cf-input.csv';
+    if (mode === 'enrich_only') {
+      link.href = '/sample-cf-enrich-input.csv';
+      link.download = 'sample-cf-enrich-input.csv';
+    } else {
+      link.href = '/sample-cf-input.csv';
+      link.download = 'sample-cf-input.csv';
+    }
     link.click();
-  }, []);
+  }, [mode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,7 +132,10 @@ export default function ContactFinder() {
       setShowToast(true);
       return;
     }
-    if (!jobTitles) {
+    // Mode-specific validation. For enrich_only, the FieldMapper's
+    // 'enrichment-combo' rule has already enforced that at least linkedin_url
+    // OR (person_name + matched_company_domain) is mapped — no extra check.
+    if (mode === 'match_and_enrich' && !jobTitles) {
       setToastMessage('Please enter the job titles you want to search for');
       setToastType('error');
       setShowToast(true);
@@ -118,7 +148,7 @@ export default function ContactFinder() {
 
       if (!user) throw new Error('You must be logged in');
 
-      // Step 1: Get pre-signed upload URL
+      // Step 1: Get pre-signed upload URL (mode-agnostic)
       setToastMessage('Preparing upload...');
       setToastType('success');
       setShowToast(true);
@@ -127,31 +157,64 @@ export default function ContactFinder() {
       if (!presignRes.ok) throw new Error('Failed to get upload URL');
       const { batch_id, upload_url, csv_s3_key } = await presignRes.json();
 
-      // Step 2: Upload CSV directly to S3
+      // For Email Enrichment, clean the CSV client-side before upload:
+      //   - If the user mapped First Name + Last Name (instead of Full Name),
+      //     synthesize a "Full Name" column and rewrite person_name to point
+      //     at it (frontend-only first_name/last_name keys are stripped).
+      //   - If the user mapped a Company Domain column, normalize each value
+      //     in place (e.g. "http://www.acme.com" → "acme.com") so Findymail's
+      //     name+domain stages get clean input. Mirrors the backend's
+      //     normalize_domain helper used in the matching engine.
+      // Backend contract is unchanged — field_mapping still carries only the
+      // canonical keys linkedin_url / person_name / matched_company_domain.
+      let uploadFile: File = file;
+      let effectiveFieldMapping: Record<string, string> = fieldMapping;
+      if (mode === 'enrich_only') {
+        const transformed = await transformEnrichmentCsv(file, fieldMapping);
+        uploadFile = transformed.file;
+        effectiveFieldMapping = transformed.fieldMapping;
+      }
+
+      // Step 2: Upload CSV directly to S3 (mode-agnostic)
       setToastMessage('Uploading file...');
       setShowToast(true);
 
       const uploadRes = await fetch(upload_url, {
         method: 'PUT',
         headers: { 'Content-Type': 'text/csv' },
-        body: file,
+        body: uploadFile,
       });
       if (!uploadRes.ok) throw new Error('Failed to upload file to S3');
 
-      // Step 3: Start the pipeline
+      // Step 3: Start the pipeline — branch on mode.
+      // - match_and_enrich: pre-Phase-4E body (no `mode` field, keeps the
+      //   regression path byte-identical for the backend's default branch).
+      // - enrich_only: new Phase 4E body. Backend dispatches directly to
+      //   enrichment-orchestrator. job_titles is intentionally absent —
+      //   the backend rejects it for enrich_only.
       setToastMessage('Starting processing...');
       setShowToast(true);
+
+      const requestBody =
+        mode === 'enrich_only'
+          ? {
+              batch_id,
+              csv_s3_key,
+              mode: 'enrich_only' as const,
+              field_mapping: effectiveFieldMapping,
+            }
+          : {
+              batch_id,
+              csv_s3_key,
+              job_titles: jobTitles,
+              enrich_emails: enrichEmails,
+              field_mapping: effectiveFieldMapping,
+            };
 
       const startRes = await fetch('/api/matching', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          batch_id,
-          csv_s3_key,
-          job_titles: jobTitles,
-          enrich_emails: enrichEmails,
-          field_mapping: fieldMapping,
-        }),
+        body: JSON.stringify(requestBody),
       });
       if (!startRes.ok) {
         const error = await startRes.json();
@@ -159,13 +222,14 @@ export default function ContactFinder() {
         throw new Error(error.error || error.message || JSON.stringify(error));
       }
 
-      // Step 4: Store batch reference for the Results page
+      // Step 4: Store batch reference for the Results page (with NEW mode column)
       if (HAS_SUPABASE) {
         await supabase.from('enrich_results').insert({
           id: batch_id,
           user_id: user.id,
           file_name: effectiveFileName,
           status: 'RUNNING',
+          mode,
           result_count: 0,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
@@ -206,8 +270,37 @@ export default function ContactFinder() {
       <div className="mb-5">
         <h1 className="text-3xl font-bold mb-1">Contact Finder</h1>
         <p className="text-gray-500">
-          Upload a CSV with companies and websites. We&apos;ll find LinkedIn contacts and optionally enrich with emails.
+          {mode === 'enrich_only'
+            ? 'Upload a CSV of already-resolved people (LinkedIn, name, domain) and run the email enrichment waterfall directly.'
+            : 'Upload a CSV with companies and websites. We\u2019ll find LinkedIn contacts and optionally enrich with emails.'}
         </p>
+      </div>
+
+      <div className="flex gap-2 mb-5 border-b border-gray-200">
+        <button
+          type="button"
+          onClick={() => switchMode('match_and_enrich')}
+          disabled={isSubmitting}
+          className={`px-4 py-2 text-sm font-medium transition-colors -mb-px ${
+            mode === 'match_and_enrich'
+              ? 'border-b-2 border-blue-600 text-blue-600'
+              : 'text-gray-500 hover:text-gray-700 disabled:text-gray-300 disabled:cursor-not-allowed'
+          }`}
+        >
+          Find Contacts
+        </button>
+        <button
+          type="button"
+          onClick={() => switchMode('enrich_only')}
+          disabled={isSubmitting}
+          className={`px-4 py-2 text-sm font-medium transition-colors -mb-px ${
+            mode === 'enrich_only'
+              ? 'border-b-2 border-blue-600 text-blue-600'
+              : 'text-gray-500 hover:text-gray-700 disabled:text-gray-300 disabled:cursor-not-allowed'
+          }`}
+        >
+          Email Enrichment
+        </button>
       </div>
 
       <div className="space-y-5">
@@ -276,30 +369,49 @@ export default function ContactFinder() {
         {file && csvHeaders.length > 0 && (
           <FieldMapper
             csvHeaders={csvHeaders}
+            requiredFields={mode === 'enrich_only' ? ENRICHMENT_FIELDS : MATCHING_FIELDS}
+            validationMode={mode === 'enrich_only' ? 'enrichment-combo' : 'all-required'}
+            helperText={
+              mode === 'enrich_only'
+                ? 'Map LinkedIn URL, OR map Company Domain together with a name (Full Name, or First Name + Last Name). Mapping LinkedIn plus a name+domain gets the best results.'
+                : undefined
+            }
             onConfirm={handleFieldMappingConfirm}
           />
         )}
 
         <div className={`space-y-4 transition-opacity ${!fieldMapping ? 'opacity-40 pointer-events-none' : ''}`}>
-          <div>
-            <label
-              htmlFor="job-titles"
-              className="block text-sm text-gray-500 mb-1.5"
-            >
-              What job titles would you like to search for?
-            </label>
-            <input
-              id="job-titles"
-              type="text"
-              placeholder="CEO, CTO, Marketing Director"
-              value={jobTitles}
-              onChange={(e) => setJobTitles(e.target.value)}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-            />
-            <p className="mt-1 text-xs text-gray-400">
-              Enter comma separated job titles
-            </p>
-          </div>
+          {mode === 'match_and_enrich' && (
+            <div>
+              <label
+                htmlFor="job-titles"
+                className="block text-sm text-gray-500 mb-1.5"
+              >
+                What job titles would you like to search for?
+              </label>
+              <input
+                id="job-titles"
+                type="text"
+                placeholder="CEO, CTO, Marketing Director"
+                value={jobTitles}
+                onChange={(e) => setJobTitles(e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                Enter comma separated job titles
+              </p>
+            </div>
+          )}
+
+          {mode === 'enrich_only' && (
+            <div className="rounded-lg bg-blue-50 border border-blue-100 px-4 py-3">
+              <p className="text-sm text-blue-800">
+                All rows will be processed through the Findymail + Wiza waterfall
+                (Stages 1&ndash;4 where data permits). Rows missing required fields
+                for a given stage are automatically skipped.
+              </p>
+            </div>
+          )}
 
           <div>
             <label
@@ -318,18 +430,20 @@ export default function ContactFinder() {
             />
           </div>
 
-          <div className="flex items-center gap-3">
-            <input
-              id="enrich-emails"
-              type="checkbox"
-              checked={enrichEmails}
-              onChange={(e) => setEnrichEmails(e.target.checked)}
-              className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-            />
-            <label htmlFor="enrich-emails" className="text-sm text-gray-600">
-              Include email enrichment (uses Findymail + Wiza credits)
-            </label>
-          </div>
+          {mode === 'match_and_enrich' && (
+            <div className="flex items-center gap-3">
+              <input
+                id="enrich-emails"
+                type="checkbox"
+                checked={enrichEmails}
+                onChange={(e) => setEnrichEmails(e.target.checked)}
+                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+              />
+              <label htmlFor="enrich-emails" className="text-sm text-gray-600">
+                Include email enrichment (uses Findymail + Wiza credits)
+              </label>
+            </div>
+          )}
         </div>
 
         <div className="pt-4">
