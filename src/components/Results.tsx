@@ -25,6 +25,7 @@ interface EnrichResult {
   user_id: string;
   file_name: string;
   status: 'RUNNING' | 'DONE' | 'ERROR';
+  mode?: 'match_and_enrich' | 'enrich_only';   // Phase 4E — read from Supabase
   result_count?: number;
   file_size?: number;
   file_url?: string;
@@ -70,6 +71,7 @@ interface BatchStatus {
     wiza_credits: number;
     current_stage?: number;
     stages?: EnrichmentStage[];
+    rows_unresolvable?: number;   // Phase 4E — from batch-status API
   };
 }
 
@@ -348,7 +350,12 @@ export default function Results() {
     return Math.min(100, ((completed + (hasInProgress ? 0.5 : 0)) / 4) * 100);
   };
 
-  const renderBatchInfo = (batchStatus: BatchStatus, isProcessing: boolean, resultId: string) => {
+  const renderBatchInfo = (
+    batchStatus: BatchStatus,
+    isProcessing: boolean,
+    resultId: string,
+    isEnrichOnly: boolean = false,
+  ) => {
     const matching = batchStatus.matching;
     const enrichment = batchStatus.enrichment;
     const status = batchStatus.status;
@@ -364,6 +371,14 @@ export default function Results() {
       );
     }
 
+    // Phase 4E: render the enrichment block whenever enrichment exists AND
+    // there's something to show — eligible rows OR an unresolvable count.
+    // The original guard `enrichment.total > 0` would have hidden the entire
+    // block (and the "X rows unusable" notice) for an all-unresolvable CSV.
+    const enrichmentRowsUnresolvable = enrichment?.rows_unresolvable ?? 0;
+    const showEnrichmentBlock =
+      !!enrichment && (enrichment.total > 0 || enrichmentRowsUnresolvable > 0);
+
     return (
       <div className="mt-3 space-y-2 w-full">
         {/* Timing */}
@@ -374,8 +389,8 @@ export default function Results() {
           )}
         </div>
 
-        {/* Matching */}
-        {matching && matching.total_rows > 0 && (
+        {/* Matching — Phase 4E: hidden entirely for enrich_only batches */}
+        {!isEnrichOnly && matching && matching.total_rows > 0 && (
           <div>
             <div className="flex justify-between text-xs text-gray-500 mb-1">
               <span>Matching {isPastMatching ? '✓' : '...'}</span>
@@ -393,7 +408,7 @@ export default function Results() {
         )}
 
         {/* Enrichment */}
-        {enrichment && enrichment.total > 0 && (
+        {showEnrichmentBlock && enrichment && (
           <div>
             <div className="flex justify-between text-xs text-gray-500 mb-1">
               <span>
@@ -406,13 +421,24 @@ export default function Results() {
               </span>
               <span>{enrichment.emails_found} emails found</span>
             </div>
-            {isProcessing && !isComplete && (
+            {isProcessing && !isComplete && enrichment.total > 0 && (
               <div className="w-full bg-gray-200 rounded-full h-2">
                 <div
                   className="bg-green-500 h-2 rounded-full transition-all duration-500"
                   style={{ width: `${getEnrichmentProgress(enrichment)}%` }}
                 />
               </div>
+            )}
+
+            {/* Phase 4E: rows the preload Lambda dropped because they had
+                neither linkedin_url nor (person_name + matched_company_domain).
+                Defaults to 0 for non-standalone batches, so this never renders
+                for them. */}
+            {enrichmentRowsUnresolvable > 0 && (
+              <p className="text-xs text-amber-600 mt-1">
+                {enrichmentRowsUnresolvable.toLocaleString()} rows unusable —
+                no LinkedIn URL or Name+Domain provided
+              </p>
             )}
 
             {/* Per-stage breakdown */}
@@ -564,6 +590,7 @@ export default function Results() {
     const batchStatus = result.batchStatus;
     const isProcessing = result.status === 'RUNNING';
     const canDownload = result.status === 'DONE' || (isProcessing && batchStatus && ['ENRICHING', 'COMPLETED'].includes(batchStatus.status));
+    const isEnrichOnly = result.mode === 'enrich_only';   // Phase 4E — drives matching-section hide
 
     return (
       <div key={`enrich-${result.id}`} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
@@ -614,7 +641,7 @@ export default function Results() {
           </div>
         </div>
 
-        {batchStatus && renderBatchInfo(batchStatus, isProcessing, result.id)}
+        {batchStatus && renderBatchInfo(batchStatus, isProcessing, result.id, isEnrichOnly)}
       </div>
     );
   };
