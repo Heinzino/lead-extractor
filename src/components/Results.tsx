@@ -87,6 +87,10 @@ interface BatchStatus {
     stages?: EnrichmentStage[];
     skip_summary?: SkipSummary;
     rows_unresolvable?: number;   // Phase 4E — from batch-status API
+    wiza_followup_at?: string;
+    late_wiza_emails_found?: number;
+    late_wiza_run_at?: string;
+    wiza_pending_count?: number;
   };
 }
 
@@ -435,9 +439,9 @@ export default function Results() {
                     : '...'}
               </span>
               <span>
-                {enrichment.emails_found} emails found
+                {enrichment.emails_found + (enrichment.late_wiza_emails_found ?? 0)} emails found
                 {((enrichment.emails_invalidated ?? 0) > 0 || (enrichment.late_emails_invalidated ?? 0) > 0) && (
-                  <> · {(enrichment.emails_invalidated ?? 0) + (enrichment.late_emails_invalidated ?? 0)} invalidated · {enrichment.emails_found - (enrichment.emails_invalidated ?? 0) - (enrichment.late_emails_invalidated ?? 0)} usable</>
+                  <> · {(enrichment.emails_invalidated ?? 0) + (enrichment.late_emails_invalidated ?? 0)} invalidated · {enrichment.emails_found + (enrichment.late_wiza_emails_found ?? 0) - (enrichment.emails_invalidated ?? 0) - (enrichment.late_emails_invalidated ?? 0)} usable</>
                 )}
               </span>
             </div>
@@ -533,6 +537,26 @@ export default function Results() {
                 <span>BounceBan: {enrichment.bounceban_credits} credits</span>
               )}
             </div>
+            {/* Wiza follow-up status */}
+            {enrichment.wiza_credits > 0 && (enrichment.wiza_followup_at || enrichment.late_wiza_run_at) && (
+              <div className="text-xs text-gray-400 mt-1 pt-1 border-t border-gray-100">
+                {enrichment.late_wiza_run_at ? (
+                  <>
+                    <span className="text-green-500 mr-1">&#10003;</span>
+                    Wiza follow-up completed {formatTime(enrichment.late_wiza_run_at)}
+                    {' '}&mdash; {enrichment.late_wiza_emails_found || 0} late email{(enrichment.late_wiza_emails_found || 0) !== 1 ? 's' : ''} found
+                    {(enrichment.late_wiza_emails_found || 0) > 0 && (
+                      <span className="block text-gray-400 mt-0.5">Re-download CSV to include late emails</span>
+                    )}
+                  </>
+                ) : enrichment.wiza_followup_at ? (
+                  <>
+                    <span className="mr-1">&#9203;</span>
+                    Wiza follow-up scheduled for {formatTime(enrichment.wiza_followup_at)} &mdash; {enrichment.wiza_pending_count || 0} pending emails
+                  </>
+                ) : null}
+              </div>
+            )}
           </div>
         )}
 
