@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Clock, CheckCircle, XCircle, Download, ChevronDown, ChevronUp } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, Ban, Download, ChevronDown, ChevronUp } from 'lucide-react';
 import { supabase } from '../lib/supabase/supabaseClient';
 import Toast from './Toast';
 
@@ -24,7 +24,7 @@ interface EnrichResult {
   id: string;
   user_id: string;
   file_name: string;
-  status: 'RUNNING' | 'DONE' | 'ERROR';
+  status: 'RUNNING' | 'DONE' | 'ERROR' | 'ABORTED';
   mode?: 'match_and_enrich' | 'enrich_only';   // Phase 4E — read from Supabase
   result_count?: number;
   file_size?: number;
@@ -105,6 +105,8 @@ export default function Results() {
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'error' | 'success'>('success');
+  const [stoppingIds, setStoppingIds] = useState<Set<string>>(new Set());
+  const [confirmStopId, setConfirmStopId] = useState<string | null>(null);
   const searchParams = useSearchParams();
 
   const results = useMemo<Result[]>(() => {
@@ -177,7 +179,7 @@ export default function Results() {
           const enrichItem: EnrichResultWithBatch = {
             ...result,
             type: 'enrich' as const,
-            status: result.status as 'RUNNING' | 'DONE' | 'ERROR',
+            status: result.status as 'RUNNING' | 'DONE' | 'ERROR' | 'ABORTED',
           };
           const batchStatus = await fetchBatchStatus(result.id);
           if (batchStatus) {
@@ -193,6 +195,13 @@ export default function Results() {
                 }).eq('id', result.id);
               } else if (batchStatus.status === 'FAILED') {
                 enrichItem.status = 'ERROR';
+              } else if (batchStatus.status === 'ABORTED') {
+                enrichItem.status = 'ABORTED';
+                await supabase.from('enrich_results').update({
+                  status: 'ABORTED',
+                  result_count: batchStatus.matching?.total_matches || 0,
+                  updated_at: new Date().toISOString(),
+                }).eq('id', result.id);
               }
             }
           }
@@ -207,12 +216,13 @@ export default function Results() {
       enrichWithStatus = await Promise.all(
         stored.map(async (s) => {
           const batchStatus = await fetchBatchStatus(s.batch_id);
-          const status = s.status === 'DONE' || s.status === 'ERROR'
+          const status = s.status === 'DONE' || s.status === 'ERROR' || s.status === 'ABORTED'
             ? s.status
             : batchStatus?.status === 'COMPLETED' ? 'DONE'
-              : batchStatus?.status === 'FAILED' ? 'ERROR' : 'RUNNING';
+              : batchStatus?.status === 'FAILED' ? 'ERROR'
+                : batchStatus?.status === 'ABORTED' ? 'ABORTED' : 'RUNNING';
 
-          if ((status === 'DONE' || status === 'ERROR') && s.status !== status) {
+          if ((status === 'DONE' || status === 'ERROR' || status === 'ABORTED') && s.status !== status) {
             s.status = status;
           }
 
@@ -220,7 +230,7 @@ export default function Results() {
             id: s.batch_id,
             user_id: 'local',
             file_name: s.file_name,
-            status: status as 'RUNNING' | 'DONE' | 'ERROR',
+            status: status as 'RUNNING' | 'DONE' | 'ERROR' | 'ABORTED',
             result_count: batchStatus?.matching?.total_matches,
             created_at: s.created_at,
             updated_at: s.created_at,
@@ -286,6 +296,8 @@ export default function Results() {
         return <CheckCircle className="w-5 h-5 text-green-500" />;
       case 'ERROR':
         return <XCircle className="w-5 h-5 text-red-500" />;
+      case 'ABORTED':
+        return <Ban className="w-5 h-5 text-orange-500" />;
     }
   };
 
@@ -343,6 +355,58 @@ export default function Results() {
     }
   };
 
+  const handleStopBatch = async (resultId: string) => {
+    setConfirmStopId(null);
+    setStoppingIds(prev => new Set(prev).add(resultId));
+    try {
+      const res = await fetch(`/api/matching/${resultId}/stop`, { method: 'POST' });
+      const data = await res.json();
+
+      if (res.ok) {
+        // Update local state
+        setEnrichResults(prev =>
+          prev.map(r => r.id === resultId ? { ...r, status: 'ABORTED' as const } : r)
+        );
+        // Update Supabase or localStorage
+        if (HAS_SUPABASE) {
+          await supabase.from('enrich_results').update({
+            status: 'ABORTED',
+            updated_at: new Date().toISOString(),
+          }).eq('id', resultId);
+        } else {
+          const stored = JSON.parse(localStorage.getItem('matching_batches') || '[]');
+          const entry = stored.find((s: { batch_id: string }) => s.batch_id === resultId);
+          if (entry) entry.status = 'ABORTED';
+          localStorage.setItem('matching_batches', JSON.stringify(stored));
+        }
+        setToastMessage('Batch execution stopped.');
+        setToastType('success');
+        setShowToast(true);
+      } else if (res.status === 409) {
+        // Race condition: batch already finished
+        setToastMessage(data.error || 'Batch already completed.');
+        setToastType('success');
+        setShowToast(true);
+        fetchEnrichResults();
+      } else {
+        setToastMessage(data.error || 'Failed to stop batch.');
+        setToastType('error');
+        setShowToast(true);
+      }
+    } catch (error) {
+      console.error('Error stopping batch:', error);
+      setToastMessage('Failed to stop batch. Please try again.');
+      setToastType('error');
+      setShowToast(true);
+    } finally {
+      setStoppingIds(prev => {
+        const next = new Set(prev);
+        next.delete(resultId);
+        return next;
+      });
+    }
+  };
+
   const formatDuration = (startStr: string, endStr: string) => {
     const ms = new Date(endStr).getTime() - new Date(startStr).getTime();
     if (ms < 1000) return `${ms}ms`;
@@ -378,8 +442,9 @@ export default function Results() {
     const matching = batchStatus.matching;
     const enrichment = batchStatus.enrichment;
     const status = batchStatus.status;
-    const isPastMatching = status === 'ENRICHING' || status === 'COMPLETED';
+    const isPastMatching = status === 'ENRICHING' || status === 'COMPLETED' || status === 'ABORTED';
     const isComplete = status === 'COMPLETED';
+    const isAborted = status === 'ABORTED';
     const isExpanded = expandedId === resultId;
 
     if (status === 'PENDING' || status === 'CONVERTING') {
@@ -434,9 +499,11 @@ export default function Results() {
                 Email Enrichment{' '}
                 {isComplete
                   ? '✓'
-                  : enrichment.current_stage
-                    ? `(Stage ${enrichment.current_stage}/${enrichment.stages?.length || 5})`
-                    : '...'}
+                  : isAborted
+                    ? '(stopped)'
+                    : enrichment.current_stage
+                      ? `(Stage ${enrichment.current_stage}/${enrichment.stages?.length || 5})`
+                      : '...'}
               </span>
               <span>
                 {enrichment.emails_found + (enrichment.late_wiza_emails_found ?? 0)} emails found
@@ -445,7 +512,7 @@ export default function Results() {
                 )}
               </span>
             </div>
-            {isProcessing && !isComplete && enrichment.total > 0 && (
+            {isProcessing && !isComplete && !isAborted && enrichment.total > 0 && (
               <div className="w-full bg-gray-200 rounded-full h-2">
                 <div
                   className="bg-green-500 h-2 rounded-full transition-all duration-500"
@@ -652,7 +719,7 @@ export default function Results() {
   const renderEnrichResult = (result: EnrichResultWithBatch) => {
     const batchStatus = result.batchStatus;
     const isProcessing = result.status === 'RUNNING';
-    const canDownload = result.status === 'DONE' || (isProcessing && batchStatus && ['ENRICHING', 'COMPLETED'].includes(batchStatus.status));
+    const canDownload = result.status === 'DONE' || result.status === 'ABORTED' || (isProcessing && batchStatus && ['ENRICHING', 'COMPLETED'].includes(batchStatus.status));
     const isEnrichOnly = result.mode === 'enrich_only';   // Phase 4E — drives matching-section hide
 
     return (
@@ -674,6 +741,19 @@ export default function Results() {
           </div>
 
           <div className="flex items-center space-x-4">
+            {result.status === 'RUNNING' && (
+              <button
+                onClick={() => setConfirmStopId(result.id)}
+                disabled={stoppingIds.has(result.id)}
+                className="p-2 text-gray-400 hover:text-red-500 hover:cursor-pointer transition-colors rounded-full hover:border disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Stop execution"
+              >
+                {stoppingIds.has(result.id)
+                  ? <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                  : <Ban className="w-5 h-5" />
+                }
+              </button>
+            )}
             {(result.status === 'DONE' || canDownload) && (
               <>
                 {result.result_count === 0 && result.status === 'DONE' ? (
@@ -701,6 +781,11 @@ export default function Results() {
                 {result.error_message}
               </span>
             )}
+            {result.status === 'ABORTED' && (
+              <span className="text-sm text-orange-500">
+                Stopped by user
+              </span>
+            )}
           </div>
         </div>
 
@@ -717,6 +802,31 @@ export default function Results() {
           type={toastType}
           onClose={() => setShowToast(false)}
         />
+      )}
+
+      {confirmStopId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-lg p-6 max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Stop batch execution?</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              This cannot be undone. Any partial results will still be available for download.
+            </p>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setConfirmStopId(null)}
+                className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleStopBatch(confirmStopId)}
+                className="px-4 py-2 text-sm text-white bg-red-500 hover:bg-red-600 rounded-lg transition-colors"
+              >
+                Stop Execution
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <div className="mb-8">
