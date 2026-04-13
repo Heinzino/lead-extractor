@@ -39,15 +39,23 @@ interface EnrichmentStage {
   name: string;
   status: 'completed' | 'in_progress' | 'pending';
   enriched?: number;
+  validated?: number;
   emails_found?: number;
   findymail_credits?: number;
   wiza_credits?: number;
-  items_skipped?: number;
-  skip_buckets?: {
-    skip_only_pn?: number;
-    skip_only_dom?: number;
-    skip_both?: number;
-    skip_only_lin?: number;
+  bounceban_credits?: number;
+  emails_invalidated?: number;
+}
+
+interface SkipSummary {
+  name_domain: {
+    total: number;
+    missing_domain: number;
+    missing_name: number;
+    missing_both: number;
+  };
+  linkedin: {
+    total: number;
   };
 }
 
@@ -69,9 +77,20 @@ interface BatchStatus {
     emails_found: number;
     findymail_credits: number;
     wiza_credits: number;
+    bounceban_credits?: number;
+    emails_invalidated?: number;
+    late_emails_invalidated?: number;
+    validated_count?: number;
+    total_to_validate?: number;
+    validation_skipped?: boolean;
     current_stage?: number;
     stages?: EnrichmentStage[];
+    skip_summary?: SkipSummary;
     rows_unresolvable?: number;   // Phase 4E — from batch-status API
+    wiza_followup_at?: string;
+    late_wiza_emails_found?: number;
+    late_wiza_run_at?: string;
+    wiza_pending_count?: number;
   };
 }
 
@@ -347,7 +366,7 @@ export default function Results() {
     if (!enrichment?.stages) return 0;
     const completed = enrichment.stages.filter(s => s.status === 'completed').length;
     const hasInProgress = enrichment.stages.some(s => s.status === 'in_progress');
-    return Math.min(100, ((completed + (hasInProgress ? 0.5 : 0)) / 4) * 100);
+    return Math.min(100, ((completed + (hasInProgress ? 0.5 : 0)) / (enrichment.stages?.length || 5)) * 100);
   };
 
   const renderBatchInfo = (
@@ -416,10 +435,15 @@ export default function Results() {
                 {isComplete
                   ? '✓'
                   : enrichment.current_stage
-                    ? `(Stage ${enrichment.current_stage}/4)`
+                    ? `(Stage ${enrichment.current_stage}/${enrichment.stages?.length || 5})`
                     : '...'}
               </span>
-              <span>{enrichment.emails_found} emails found</span>
+              <span>
+                {enrichment.emails_found + (enrichment.late_wiza_emails_found ?? 0)} emails found
+                {((enrichment.emails_invalidated ?? 0) > 0 || (enrichment.late_emails_invalidated ?? 0) > 0) && (
+                  <> · {(enrichment.emails_invalidated ?? 0) + (enrichment.late_emails_invalidated ?? 0)} invalidated · {enrichment.emails_found + (enrichment.late_wiza_emails_found ?? 0) - (enrichment.emails_invalidated ?? 0) - (enrichment.late_emails_invalidated ?? 0)} usable</>
+                )}
+              </span>
             </div>
             {isProcessing && !isComplete && enrichment.total > 0 && (
               <div className="w-full bg-gray-200 rounded-full h-2">
@@ -441,59 +465,98 @@ export default function Results() {
               </p>
             )}
 
+            {enrichment.validation_skipped && (
+              <p className="text-xs text-amber-600 mt-1">
+                BounceBan validation was skipped — set BOUNCEBAN_API_KEY on the
+                email-enrichment Lambda to enable.
+              </p>
+            )}
+
+            {/* Skip summary banner — static pre-scan counts shown once above stages */}
+            {enrichment.skip_summary && (() => {
+              const nd = enrichment.skip_summary!.name_domain;
+              const li = enrichment.skip_summary!.linkedin;
+              const total = enrichment.total || 0;
+              const hasNameSkips = nd.total > 0;
+              const hasLinkedinSkips = li.total > 0;
+              if (!hasNameSkips && !hasLinkedinSkips) return null;
+              const ndParts: string[] = [];
+              if (nd.missing_domain > 0) ndParts.push(`${nd.missing_domain.toLocaleString()} missing domain`);
+              if (nd.missing_name > 0) ndParts.push(`${nd.missing_name.toLocaleString()} missing name`);
+              if (nd.missing_both > 0) ndParts.push(`${nd.missing_both.toLocaleString()} missing both`);
+              return (
+                <div className="mt-1 space-y-0.5">
+                  {hasNameSkips && (
+                    <p className="text-xs text-amber-500">
+                      {nd.total.toLocaleString()} of {total.toLocaleString()} missing fields for name search
+                      {ndParts.length > 0 && ` (${ndParts.join(' · ')})`}
+                    </p>
+                  )}
+                  {hasLinkedinSkips && (
+                    <p className="text-xs text-amber-500">
+                      {li.total.toLocaleString()} of {total.toLocaleString()} missing LinkedIn URL
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* Per-stage breakdown */}
             {enrichment.stages && enrichment.stages.length > 0 && (
               <div className="mt-2 space-y-1">
-                {enrichment.stages.map((stage) => {
-                  const skipLabels: Record<string, string> = {
-                    skip_only_dom: 'missing company domain',
-                    skip_only_pn: 'missing person name',
-                    skip_both: 'missing both',
-                    skip_only_lin: 'missing LinkedIn URL',
-                  };
-                  const bucketEntries = stage.skip_buckets
-                    ? (Object.entries(stage.skip_buckets) as [string, number | undefined][])
-                        .filter(([, v]) => (v ?? 0) > 0)
-                        .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
-                    : [];
-                  // For single-field stages (only skip_only_lin), the breakdown duplicates the total — hide it
-                  const showBreakdown =
-                    (stage.items_skipped ?? 0) > 0 &&
-                    bucketEntries.length > 0 &&
-                    !(bucketEntries.length === 1 && bucketEntries[0][0] === 'skip_only_lin');
-                  return (
-                    <div key={stage.stage}>
-                      <div className="flex items-center gap-2 text-xs">
-                        {getStageStatusIcon(stage.status)}
-                        <span className={`w-44 flex-shrink-0 ${stage.status === 'pending' ? 'text-gray-400' : 'text-gray-600'}`}>
-                          {stage.name}
-                        </span>
-                        {stage.status !== 'pending' && (
-                          <span className="text-gray-400">
+                {enrichment.stages.map((stage) => (
+                  <div key={stage.stage} className="flex items-center gap-2 text-xs">
+                    {getStageStatusIcon(stage.status)}
+                    <span className={`w-44 flex-shrink-0 ${stage.status === 'pending' ? 'text-gray-400' : 'text-gray-600'}`}>
+                      {stage.name}
+                    </span>
+                    {stage.status !== 'pending' && (
+                      <span className="text-gray-400">
+                        {stage.stage === 5 ? (
+                          <>
+                            {(stage.validated ?? 0).toLocaleString()} validated · {(stage.emails_invalidated ?? 0).toLocaleString()} dropped · {(stage.bounceban_credits ?? 0).toLocaleString()} BB credits
+                          </>
+                        ) : (
+                          <>
                             {(stage.enriched ?? 0).toLocaleString()} processed · {(stage.emails_found ?? 0).toLocaleString()} emails
                             {(stage.findymail_credits ?? 0) > 0 && ` · ${(stage.findymail_credits ?? 0).toLocaleString()} FM credits`}
                             {(stage.wiza_credits ?? 0) > 0 && ` · ${(stage.wiza_credits ?? 0).toLocaleString()} Wiza credits`}
-                            <span className={(stage.items_skipped ?? 0) > 0 ? 'text-amber-500' : 'text-gray-400'}>
-                              {' '}· {(stage.items_skipped ?? 0).toLocaleString()} skipped
-                            </span>
-                          </span>
+                          </>
                         )}
-                      </div>
-                      {showBreakdown && (
-                        <div className="ml-12 text-xs text-amber-500/80">
-                          ↳ {bucketEntries.map(([k, v]) => `${(v ?? 0).toLocaleString()} ${skipLabels[k]}`).join(' · ')}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                      </span>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
 
             <div className="flex gap-3 text-xs text-gray-400 mt-1">
               <span>Findymail: {enrichment.findymail_credits} credits</span>
               <span>Wiza: {enrichment.wiza_credits} credits</span>
+              {(enrichment.bounceban_credits ?? 0) > 0 && (
+                <span>BounceBan: {enrichment.bounceban_credits} credits</span>
+              )}
             </div>
+            {/* Wiza follow-up status */}
+            {enrichment.wiza_credits > 0 && (enrichment.wiza_followup_at || enrichment.late_wiza_run_at) && (
+              <div className="text-xs text-gray-400 mt-1 pt-1 border-t border-gray-100">
+                {enrichment.late_wiza_run_at ? (
+                  <>
+                    <span className="text-green-500 mr-1">&#10003;</span>
+                    Wiza follow-up completed {formatTime(enrichment.late_wiza_run_at)}
+                    {' '}&mdash; {enrichment.late_wiza_emails_found || 0} late email{(enrichment.late_wiza_emails_found || 0) !== 1 ? 's' : ''} found
+                    {(enrichment.late_wiza_emails_found || 0) > 0 && (
+                      <span className="block text-gray-400 mt-0.5">Re-download CSV to include late emails</span>
+                    )}
+                  </>
+                ) : enrichment.wiza_followup_at ? (
+                  <>
+                    <span className="mr-1">&#9203;</span>
+                    Wiza follow-up scheduled for {formatTime(enrichment.wiza_followup_at)} &mdash; {enrichment.wiza_pending_count || 0} pending emails
+                  </>
+                ) : null}
+              </div>
+            )}
           </div>
         )}
 
