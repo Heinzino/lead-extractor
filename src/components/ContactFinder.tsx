@@ -1,13 +1,17 @@
 import { useState, useCallback } from 'react';
+import { parse } from 'csv-parse/sync';
 import { X, Download, FileText } from 'lucide-react';
 import Button from './Button';
 import Toast from './Toast';
 import FileUploaderBox from './FileUploaderBox';
 import FieldMapper from './FieldMapper';
+import CsvPreviewTable from './CsvPreviewTable';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase/supabaseClient';
 import { MATCHING_FIELDS, ENRICHMENT_FIELDS } from '../lib/fieldConfigs';
 import { transformEnrichmentCsv } from '../lib/csvTransform';
+
+const PREVIEW_ROW_LIMIT = 10;
 
 type ContactFinderMode = 'match_and_enrich' | 'enrich_only';
 
@@ -25,6 +29,8 @@ export default function ContactFinder() {
   const [mode, setMode] = useState<ContactFinderMode>('match_and_enrich');
   const [file, setFile] = useState<File | null>(null);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
+  const [previewRows, setPreviewRows] = useState<string[][]>([]);
+  const [totalRowCount, setTotalRowCount] = useState(0);
   const [fieldMapping, setFieldMapping] = useState<Record<string, string> | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -45,6 +51,8 @@ export default function ContactFinder() {
     setMode(next);
     setFile(null);
     setCsvHeaders([]);
+    setPreviewRows([]);
+    setTotalRowCount(0);
     setFieldMapping(null);
     setJobTitles('');
     setEnrichEmails(false);
@@ -64,21 +72,38 @@ export default function ContactFinder() {
     }
     setIsUploading(true);
     try {
-      // Read only the first line to extract headers (not the full file)
       const text = await uploadedFile.text();
-      const firstLine = text.split('\n')[0];
-      // Handle BOM
-      const clean = firstLine.replace(/^\uFEFF/, '');
-      const headers = clean.split(',').map(h => h.trim().replace(/^"|"$/g, ''));
 
-      if (headers.length === 0) {
+      // Parse only header + first N data rows for the preview. Full transform
+      // happens later in transformEnrichmentCsv on submit.
+      const parsedRows = parse(text, {
+        bom: true,
+        relax_column_count: true,
+        skip_empty_lines: true,
+        to_line: PREVIEW_ROW_LIMIT + 1,
+      }) as string[][];
+
+      if (parsedRows.length === 0 || parsedRows[0].length === 0) {
         setToastMessage('CSV file has no headers');
         setToastType('error');
         setShowToast(true);
         return;
       }
 
+      const headers = parsedRows[0].map(h => h.trim());
+      const dataRows = parsedRows.slice(1, PREVIEW_ROW_LIMIT + 1);
+
+      // Rough total-row count for the preview caption — counts newlines in the
+      // raw text minus the header. Not a precise CSV row count (quoted fields
+      // containing newlines would inflate it), but adequate for a hint.
+      const approxTotal = Math.max(
+        0,
+        text.split('\n').filter(l => l.trim().length > 0).length - 1,
+      );
+
       setCsvHeaders(headers);
+      setPreviewRows(dataRows);
+      setTotalRowCount(approxTotal);
       setFile(uploadedFile);
       setFieldMapping(null);
       setHasUploadError(false);
@@ -111,6 +136,8 @@ export default function ContactFinder() {
   const removeFile = useCallback(() => {
     setFile(null);
     setCsvHeaders([]);
+    setPreviewRows([]);
+    setTotalRowCount(0);
     setFieldMapping(null);
   }, []);
 
@@ -364,6 +391,14 @@ export default function ContactFinder() {
             </div>
           )}
         </div>
+
+        {file && previewRows.length > 0 && (
+          <CsvPreviewTable
+            headers={csvHeaders}
+            rows={previewRows}
+            totalRows={totalRowCount}
+          />
+        )}
 
         {file && csvHeaders.length > 0 && (
           <FieldMapper
