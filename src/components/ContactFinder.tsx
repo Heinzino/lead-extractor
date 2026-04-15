@@ -31,6 +31,7 @@ export default function ContactFinder() {
   const [jobTitles, setJobTitles] = useState('');
   const [fileName, setFileName] = useState('');
   const [enrichEmails, setEnrichEmails] = useState(false);
+  const [maxMatchesPerBusiness, setMaxMatchesPerBusiness] = useState(20);
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'error' | 'success'>('success');
@@ -47,6 +48,7 @@ export default function ContactFinder() {
     setFieldMapping(null);
     setJobTitles('');
     setEnrichEmails(false);
+    setMaxMatchesPerBusiness(20);
     setFileName('');
     setHasUploadError(false);
     setIsSubmitting(false);
@@ -157,23 +159,19 @@ export default function ContactFinder() {
       if (!presignRes.ok) throw new Error('Failed to get upload URL');
       const { batch_id, upload_url, csv_s3_key } = await presignRes.json();
 
-      // For Email Enrichment, clean the CSV client-side before upload:
-      //   - If the user mapped First Name + Last Name (instead of Full Name),
-      //     synthesize a "Full Name" column and rewrite person_name to point
-      //     at it (frontend-only first_name/last_name keys are stripped).
-      //   - If the user mapped a Company Domain column, normalize each value
-      //     in place (e.g. "http://www.acme.com" → "acme.com") so Findymail's
-      //     name+domain stages get clean input. Mirrors the backend's
-      //     normalize_domain helper used in the matching engine.
-      // Backend contract is unchanged — field_mapping still carries only the
-      // canonical keys linkedin_url / person_name / matched_company_domain.
-      let uploadFile: File = file;
-      let effectiveFieldMapping: Record<string, string> = fieldMapping;
-      if (mode === 'enrich_only') {
-        const transformed = await transformEnrichmentCsv(file, fieldMapping);
-        uploadFile = transformed.file;
-        effectiveFieldMapping = transformed.fieldMapping;
-      }
+      // Clean the CSV client-side before upload (both modes):
+      //   - First Name + Last Name → synthesize "Full Name" (person_name).
+      //   - enrich_only: mapped Company Domain → append "{col} (normalized)"
+      //     and rewrite matched_company_domain to point at it (Findymail's
+      //     name+domain stages read matched_company_domain directly).
+      //   - match_and_enrich: mapped website → append "{col} (normalized)"
+      //     and set a new user_company_domain key. Email enrichment prefers
+      //     this over the LinkedIn-side matched_company_domain so emails go
+      //     to the user's target domain. field_mapping.website is unchanged;
+      //     matching-engine stage-0 still reads the raw column.
+      const transformed = await transformEnrichmentCsv(file, fieldMapping);
+      const uploadFile: File = transformed.file;
+      const effectiveFieldMapping: Record<string, string> = transformed.fieldMapping;
 
       // Step 2: Upload CSV directly to S3 (mode-agnostic)
       setToastMessage('Uploading file...');
@@ -208,6 +206,7 @@ export default function ContactFinder() {
               csv_s3_key,
               job_titles: jobTitles,
               enrich_emails: enrichEmails,
+              max_matches_per_business: maxMatchesPerBusiness,
               field_mapping: effectiveFieldMapping,
             };
 
@@ -399,6 +398,36 @@ export default function ContactFinder() {
               />
               <p className="mt-1 text-xs text-gray-400">
                 Enter comma separated job titles
+              </p>
+            </div>
+          )}
+
+          {mode === 'match_and_enrich' && (
+            <div>
+              <label
+                htmlFor="max-matches"
+                className="block text-sm text-gray-500 mb-1.5"
+              >
+                Max matches per business
+              </label>
+              <input
+                id="max-matches"
+                type="number"
+                min={1}
+                max={20}
+                value={maxMatchesPerBusiness}
+                onChange={(e) => {
+                  const n = parseInt(e.target.value, 10);
+                  if (Number.isNaN(n)) {
+                    setMaxMatchesPerBusiness(20);
+                    return;
+                  }
+                  setMaxMatchesPerBusiness(Math.min(20, Math.max(1, n)));
+                }}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                Up to 20 LinkedIn matches per input business (default 20).
               </p>
             </div>
           )}

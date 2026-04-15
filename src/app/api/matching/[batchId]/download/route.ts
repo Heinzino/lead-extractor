@@ -21,27 +21,29 @@ export async function GET(
 
     const data = await apiResponse.json();
 
-    if (!apiResponse.ok || !data.download_url) {
+    if (!apiResponse.ok || data.status !== 'READY' || !data.download_url) {
       return NextResponse.json(data, { status: apiResponse.status });
     }
 
-    // Proxy the S3 file through our server to avoid CORS issues
+    // Proxy the S3 file through our server to avoid CORS issues.
+    // Stream the body straight through — never buffer the whole CSV in
+    // memory (exports for large batches are 100+ MB).
     const fileResponse = await fetch(data.download_url);
-    if (!fileResponse.ok) {
+    if (!fileResponse.ok || !fileResponse.body) {
       return NextResponse.json(
         { error: 'Failed to fetch file from storage' },
         { status: 502 }
       );
     }
 
-    const fileBuffer = await fileResponse.arrayBuffer();
+    const headers: Record<string, string> = {
+      'Content-Type': 'text/csv',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    };
+    const contentLength = fileResponse.headers.get('content-length');
+    if (contentLength) headers['Content-Length'] = contentLength;
 
-    return new NextResponse(fileBuffer, {
-      headers: {
-        'Content-Type': 'text/csv',
-        'Content-Disposition': `attachment; filename="${filename}"`,
-      },
-    });
+    return new NextResponse(fileResponse.body, { headers });
   } catch (error) {
     console.error('Matching API download error:', error);
     return NextResponse.json(
