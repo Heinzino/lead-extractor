@@ -49,21 +49,31 @@ export function normalizeDomain(input: string): string {
 }
 
 /**
- * Transform an Email Enrichment CSV before upload to S3:
+ * Transform a Contact Finder CSV before upload to S3:
  *
  *   1. If the user mapped first_name + last_name (instead of person_name),
  *      append a synthesized "Full Name" column and rewrite
  *      field_mapping.person_name to point at it. The frontend-only
  *      first_name/last_name keys are stripped from the mapping.
  *
- *   2. If the user mapped matched_company_domain, normalize every value in
- *      that column in place using normalizeDomain — converts URLs like
- *      "http://www.acme.com" into bare domains "acme.com" so Findymail's
- *      name+domain stages get clean input. Stages 1-2 of the enrichment
- *      waterfall expect a bare host and silently fail to find emails when
- *      handed a full URL.
+ *   2. If the user mapped matched_company_domain (enrich-only mode),
+ *      append a synthesized "{domainCol} (normalized)" column and rewrite
+ *      field_mapping.matched_company_domain to point at it. Email enrichment
+ *      (Findymail + Wiza name+domain) reads matched_company_domain directly.
  *
- * If neither transformation applies, returns the original file unchanged
+ *   3. If the user mapped website (match_and_enrich mode), append a
+ *      synthesized "{websiteCol} (normalized)" column and add a NEW mapping
+ *      key user_company_domain pointing at it. field_mapping.website is left
+ *      unchanged — the matching engine still uses the raw column for its
+ *      stage-0 domain query (it runs its own normalize_domain). Email
+ *      enrichment prefers user_company_domain over matched_company_domain
+ *      (LinkedIn-side) so emails go to the user's target domain.
+ *
+ * All transforms are append-only: the user's original columns retain their
+ * original names, positions, AND values. field_mapping is updated to point
+ * at the synthesized column for whichever canonical key consumes it.
+ *
+ * If no transformation applies, returns the original file unchanged
  * (just strips any leftover frontend-only keys from the mapping).
  *
  * Uses csv-parse / csv-stringify (already installed) to handle BOM, CRLF,
@@ -75,12 +85,14 @@ export async function transformEnrichmentCsv(
 ): Promise<TransformResult> {
   const { first_name: firstCol, last_name: lastCol, ...rest } = mapping;
   const domainCol = rest.matched_company_domain || '';
+  const websiteCol = rest.website || '';
   const needsName = Boolean(firstCol && lastCol);
   const needsDomain = Boolean(domainCol);
+  const needsWebsite = Boolean(websiteCol);
 
   // Nothing to do — return the original file with frontend-only keys
   // stripped from the mapping.
-  if (!needsName && !needsDomain) {
+  if (!needsName && !needsDomain && !needsWebsite) {
     return { file: originalFile, fieldMapping: rest };
   }
 
@@ -101,18 +113,61 @@ export async function transformEnrichmentCsv(
   let headers = rows[0];
   let newMapping: Record<string, string> = { ...rest };
 
-  // --- Domain normalization (in place on the mapped column) ---
+  // --- Domain normalization (append a new column; leave user's column intact) ---
   if (needsDomain) {
     const domainIdx = headers.indexOf(domainCol);
     if (domainIdx === -1) {
       throw new Error(`Could not find ${domainCol} column in CSV`);
     }
+
+    // Pick a non-colliding header name. Prefer "{domainCol} (normalized)".
+    let normalizedCol = `${domainCol} (normalized)`;
+    let suffix = 0;
+    const existing = new Set(headers);
+    while (existing.has(normalizedCol)) {
+      suffix += 1;
+      normalizedCol = `${domainCol} (normalized ${suffix})`;
+    }
+
+    headers = [...headers, normalizedCol];
+    rows[0] = headers;
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
-      if (domainIdx < row.length) {
-        row[domainIdx] = normalizeDomain(row[domainIdx] ?? '');
-      }
+      const raw = domainIdx < row.length ? (row[domainIdx] ?? '') : '';
+      rows[i] = [...row, normalizeDomain(raw)];
     }
+
+    newMapping = { ...newMapping, matched_company_domain: normalizedCol };
+  }
+
+  // --- Website normalization for match_and_enrich (append a new column;
+  //     leave user's website column intact so matching-engine's stage-0
+  //     query still sees the raw value). Adds a NEW mapping key
+  //     user_company_domain — email enrichment prefers it over the
+  //     LinkedIn-side matched_company_domain. ---
+  if (needsWebsite) {
+    const websiteIdx = headers.indexOf(websiteCol);
+    if (websiteIdx === -1) {
+      throw new Error(`Could not find ${websiteCol} column in CSV`);
+    }
+
+    let normalizedCol = `${websiteCol} (normalized)`;
+    let suffix = 0;
+    const existing = new Set(headers);
+    while (existing.has(normalizedCol)) {
+      suffix += 1;
+      normalizedCol = `${websiteCol} (normalized ${suffix})`;
+    }
+
+    headers = [...headers, normalizedCol];
+    rows[0] = headers;
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const raw = websiteIdx < row.length ? (row[websiteIdx] ?? '') : '';
+      rows[i] = [...row, normalizeDomain(raw)];
+    }
+
+    newMapping = { ...newMapping, user_company_domain: normalizedCol };
   }
 
   // --- Name synthesis (append a new column) ---

@@ -63,6 +63,7 @@ interface BatchStatus {
   batch_id: string;
   status: string;
   created_at?: string;
+  enqueued_at?: string;
   completed_at?: string;
   job_titles?: string;
   enrich_emails?: boolean;
@@ -106,6 +107,10 @@ export default function Results() {
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'error' | 'success'>('success');
   const [stoppingIds, setStoppingIds] = useState<Set<string>>(new Set());
+  const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
+  const [downloadProgress, setDownloadProgress] = useState<Map<string, number>>(new Map());
+  const [downloadPhase, setDownloadPhase] = useState<Map<string, 'generating' | 'downloading'>>(new Map());
+  const [downloadErrors, setDownloadErrors] = useState<Map<string, string>>(new Map());
   const [confirmStopId, setConfirmStopId] = useState<string | null>(null);
   const searchParams = useSearchParams();
 
@@ -333,25 +338,114 @@ export default function Results() {
     window.URL.revokeObjectURL(url);
   };
 
-  const handleEnrichDownload = async (result: EnrichResultWithBatch) => {
-    try {
-      const fileName = `${result.file_name}.csv`;
+  const handleEnrichDownload = async (
+    result: EnrichResultWithBatch,
+    isRetry = false,
+  ) => {
+    const id = result.id;
+    const fileName = `${result.file_name}.csv`;
 
-      if (!result.file_url) {
-        const res = await fetch(`/api/matching/${result.id}/download?filename=${encodeURIComponent(fileName)}`);
-        if (!res.ok) throw new Error('Download not ready');
-        const blob = await res.blob();
+    // Reset any prior error for this row.
+    setDownloadErrors(prev => {
+      if (!prev.has(id)) return prev;
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
+    setDownloadingIds(prev => new Set(prev).add(id));
+    setDownloadProgress(prev => new Map(prev).set(id, 0));
+    setDownloadPhase(prev => new Map(prev).set(id, 'generating'));
+
+    const clearProgress = () => {
+      setDownloadProgress(prev => {
+        if (!prev.has(id)) return prev;
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
+      setDownloadingIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setDownloadPhase(prev => {
+        if (!prev.has(id)) return prev;
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
+    };
+
+    try {
+      // Business Finder (Serper) path: file_url is a direct S3/Storage URL.
+      if (result.file_url) {
+        const response = await fetch(result.file_url);
+        const blob = await response.blob();
         downloadBlob(blob, fileName);
         return;
       }
-      const response = await fetch(result.file_url);
-      const blob = await response.blob();
-      downloadBlob(blob, fileName);
+
+      // Contact Finder path: poll async-export status until READY, then
+      // stream-download the CSV through the proxy.
+      const MAX_WAIT_MS = 15 * 60 * 1000;
+      const startTime = Date.now();
+      let useRetryFlag = isRetry;
+
+      while (Date.now() - startTime < MAX_WAIT_MS) {
+        const statusUrl = useRetryFlag
+          ? `/api/matching/${id}/download-status?retry=1`
+          : `/api/matching/${id}/download-status`;
+        const statusRes = await fetch(statusUrl);
+        if (!statusRes.ok && statusRes.status !== 409) {
+          throw new Error(`Status check failed (${statusRes.status})`);
+        }
+        const data = await statusRes.json();
+
+        if (data.status === 'READY') {
+          // Flip to the 'downloading' phase and keep the counter ticking
+          // while the (possibly 100+ MB) CSV streams to the browser —
+          // otherwise it would freeze at the generation-end time.
+          setDownloadPhase(prev => new Map(prev).set(id, 'downloading'));
+          const tick = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            setDownloadProgress(prev => new Map(prev).set(id, elapsed));
+          }, 1000);
+          try {
+            const csvRes = await fetch(
+              `/api/matching/${id}/download?filename=${encodeURIComponent(fileName)}`
+            );
+            if (!csvRes.ok) throw new Error('Download failed');
+            const blob = await csvRes.blob();
+            downloadBlob(blob, fileName);
+          } finally {
+            clearInterval(tick);
+          }
+          return;
+        }
+        if (data.status === 'FAILED') {
+          throw new Error(data.error || 'Export failed');
+        }
+        if (data.status === 'NOT_READY') {
+          throw new Error(
+            `Batch is ${data.batch_status || 'not ready'}`
+          );
+        }
+        // GENERATING — update elapsed counter, wait using backend's
+        // retry_after (fall back to 3s if missing/invalid).
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        setDownloadProgress(prev => new Map(prev).set(id, elapsed));
+        const retryAfter = Number(data.retry_after);
+        const waitMs = (Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 3) * 1000;
+        await new Promise(r => setTimeout(r, waitMs));
+        useRetryFlag = false;
+      }
+      throw new Error('Generation taking too long — please retry');
     } catch (error) {
       console.error('Error downloading file:', error);
-      setToastMessage('Error downloading file');
-      setToastType('error');
-      setShowToast(true);
+      const message = error instanceof Error ? error.message : 'Download failed';
+      setDownloadErrors(prev => new Map(prev).set(id, message));
+    } finally {
+      clearProgress();
     }
   };
 
@@ -442,10 +536,24 @@ export default function Results() {
     const matching = batchStatus.matching;
     const enrichment = batchStatus.enrichment;
     const status = batchStatus.status;
-    const isPastMatching = status === 'ENRICHING' || status === 'COMPLETED' || status === 'ABORTED';
+    const isPastMatching = status === 'ENRICHING' || status === 'COMPLETED' || status === 'ABORTED' || status === 'FAILED';
     const isComplete = status === 'COMPLETED';
     const isAborted = status === 'ABORTED';
+    const isFailed = status === 'FAILED';
     const isExpanded = expandedId === resultId;
+
+    if (status === 'QUEUED') {
+      return (
+        <div className="mt-3">
+          <span className="text-xs text-gray-500">
+            Queued
+            {batchStatus.enqueued_at
+              ? ` — waiting since ${formatTime(batchStatus.enqueued_at)}`
+              : ''}
+          </span>
+        </div>
+      );
+    }
 
     if (status === 'PENDING' || status === 'CONVERTING') {
       return (
@@ -501,9 +609,11 @@ export default function Results() {
                   ? '✓'
                   : isAborted
                     ? '(stopped)'
-                    : enrichment.current_stage
-                      ? `(Stage ${enrichment.current_stage}/${enrichment.stages?.length || 5})`
-                      : '...'}
+                    : isFailed
+                      ? '(failed)'
+                      : enrichment.current_stage
+                        ? `(Stage ${enrichment.current_stage}/${enrichment.stages?.length || 5})`
+                        : '...'}
               </span>
               <span>
                 {enrichment.emails_found + (enrichment.late_wiza_emails_found ?? 0)} emails found
@@ -512,7 +622,7 @@ export default function Results() {
                 )}
               </span>
             </div>
-            {isProcessing && !isComplete && !isAborted && enrichment.total > 0 && (
+            {isProcessing && !isComplete && !isAborted && !isFailed && enrichment.total > 0 && (
               <div className="w-full bg-gray-200 rounded-full h-2">
                 <div
                   className="bg-green-500 h-2 rounded-full transition-all duration-500"
@@ -766,12 +876,37 @@ export default function Results() {
                       {result.result_count != null && <p>Results: {result.result_count}</p>}
                       {result.file_size != null && <p>Size: {formatFileSize(result.file_size)}</p>}
                     </div>
-                    <button
-                      onClick={() => handleEnrichDownload(result)}
-                      className="p-2 text-gray-500 hover:text-accentBlue hover:cursor-pointer transition-colors rounded-full hover:border"
-                    >
-                      <Download className="w-5 h-5" />
-                    </button>
+                    {downloadErrors.has(result.id) ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-red-500">
+                          Export failed: {downloadErrors.get(result.id)}
+                        </span>
+                        <button
+                          onClick={() => handleEnrichDownload(result, true)}
+                          className="text-xs px-3 py-1 bg-accentBlue text-white rounded hover:opacity-90 transition-colors"
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        {downloadingIds.has(result.id) && (
+                          <span className="text-xs text-gray-500">
+                            {downloadPhase.get(result.id) === 'downloading' ? 'Downloading' : 'Generating'}... {downloadProgress.get(result.id) ?? 0}s
+                          </span>
+                        )}
+                        <button
+                          onClick={() => handleEnrichDownload(result)}
+                          disabled={downloadingIds.has(result.id)}
+                          className="p-2 text-gray-500 hover:text-accentBlue hover:cursor-pointer transition-colors rounded-full hover:border disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {downloadingIds.has(result.id)
+                            ? <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                            : <Download className="w-5 h-5" />
+                          }
+                        </button>
+                      </div>
+                    )}
                   </>
                 )}
               </>
