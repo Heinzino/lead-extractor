@@ -37,7 +37,7 @@ export default function ContactFinder() {
   const [jobTitles, setJobTitles] = useState('');
   const [fileName, setFileName] = useState('');
   const [enrichEmails, setEnrichEmails] = useState(false);
-  const [maxMatchesPerBusiness, setMaxMatchesPerBusiness] = useState(20);
+  const [maxMatchesPerBusiness, setMaxMatchesPerBusiness] = useState<number | ''>(20);
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'error' | 'success'>('success');
@@ -233,7 +233,10 @@ export default function ContactFinder() {
               csv_s3_key,
               job_titles: jobTitles,
               enrich_emails: enrichEmails,
-              max_matches_per_business: maxMatchesPerBusiness,
+              max_matches_per_business:
+                maxMatchesPerBusiness === ''
+                  ? 20
+                  : Math.min(20, Math.max(1, maxMatchesPerBusiness)),
               field_mapping: effectiveFieldMapping,
             };
 
@@ -452,12 +455,22 @@ export default function ContactFinder() {
                 max={20}
                 value={maxMatchesPerBusiness}
                 onChange={(e) => {
-                  const n = parseInt(e.target.value, 10);
-                  if (Number.isNaN(n)) {
-                    setMaxMatchesPerBusiness(20);
+                  const v = e.target.value;
+                  if (v === '') {
+                    setMaxMatchesPerBusiness('');
                     return;
                   }
-                  setMaxMatchesPerBusiness(Math.min(20, Math.max(1, n)));
+                  const n = parseInt(v, 10);
+                  if (!Number.isNaN(n)) {
+                    setMaxMatchesPerBusiness(n);
+                  }
+                }}
+                onBlur={() => {
+                  if (maxMatchesPerBusiness === '' || maxMatchesPerBusiness < 1) {
+                    setMaxMatchesPerBusiness(1);
+                  } else if (maxMatchesPerBusiness > 20) {
+                    setMaxMatchesPerBusiness(20);
+                  }
                 }}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
               />

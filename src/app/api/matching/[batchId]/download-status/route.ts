@@ -10,7 +10,11 @@ export async function GET(
   try {
     const { batchId } = await params;
     const retry = request.nextUrl.searchParams.get('retry');
-    const qs = retry ? '?retry=1' : '';
+    const filename = request.nextUrl.searchParams.get('filename');
+    const forwarded = new URLSearchParams();
+    if (retry) forwarded.set('retry', '1');
+    if (filename) forwarded.set('filename', filename);
+    const qs = forwarded.toString() ? `?${forwarded.toString()}` : '';
 
     const apiResponse = await fetch(
       `${MATCHING_API_URL}/batches/${batchId}/results/download${qs}`,

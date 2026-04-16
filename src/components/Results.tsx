@@ -392,9 +392,9 @@ export default function Results() {
       let useRetryFlag = isRetry;
 
       while (Date.now() - startTime < MAX_WAIT_MS) {
-        const statusUrl = useRetryFlag
-          ? `/api/matching/${id}/download-status?retry=1`
-          : `/api/matching/${id}/download-status`;
+        const statusParams = new URLSearchParams({ filename: fileName });
+        if (useRetryFlag) statusParams.set('retry', '1');
+        const statusUrl = `/api/matching/${id}/download-status?${statusParams.toString()}`;
         const statusRes = await fetch(statusUrl);
         if (!statusRes.ok && statusRes.status !== 409) {
           throw new Error(`Status check failed (${statusRes.status})`);
@@ -402,24 +402,21 @@ export default function Results() {
         const data = await statusRes.json();
 
         if (data.status === 'READY') {
-          // Flip to the 'downloading' phase and keep the counter ticking
-          // while the (possibly 100+ MB) CSV streams to the browser —
-          // otherwise it would freeze at the generation-end time.
-          setDownloadPhase(prev => new Map(prev).set(id, 'downloading'));
-          const tick = setInterval(() => {
-            const elapsed = Math.floor((Date.now() - startTime) / 1000);
-            setDownloadProgress(prev => new Map(prev).set(id, elapsed));
-          }, 1000);
-          try {
-            const csvRes = await fetch(
-              `/api/matching/${id}/download?filename=${encodeURIComponent(fileName)}`
-            );
-            if (!csvRes.ok) throw new Error('Download failed');
-            const blob = await csvRes.blob();
-            downloadBlob(blob, fileName);
-          } finally {
-            clearInterval(tick);
+          // Direct-download from S3 via the presigned URL. Skipping the
+          // Vercel proxy avoids the serverless maxDuration cap and the
+          // browser-side blob buffer, so 100+ MB exports work. S3 returns
+          // Content-Disposition: attachment (set via the presigned URL's
+          // ResponseContentDisposition param), which forces download even
+          // cross-origin.
+          if (!data.download_url) {
+            throw new Error('Download failed: no URL returned');
           }
+          const link = document.createElement('a');
+          link.href = data.download_url;
+          link.download = fileName;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
           return;
         }
         if (data.status === 'FAILED') {
@@ -520,11 +517,35 @@ export default function Results() {
     });
   };
 
+  const getStageEligible = (
+    stageNum: number,
+    enrichment: NonNullable<BatchStatus['enrichment']>,
+  ): number => {
+    const total = enrichment.total || 0;
+    const ndSkip = enrichment.skip_summary?.name_domain.total ?? 0;
+    const liSkip = enrichment.skip_summary?.linkedin.total ?? 0;
+    let eligible: number;
+    switch (stageNum) {
+      case 1: case 2: eligible = total - ndSkip; break;
+      case 3: case 4: eligible = total - liSkip; break;
+      case 5:         eligible = enrichment.total_to_validate ?? enrichment.emails_found ?? 0; break;
+      default:        eligible = total;
+    }
+    return eligible > 0 ? eligible : total;
+  };
+
   const getEnrichmentProgress = (enrichment: BatchStatus['enrichment']): number => {
-    if (!enrichment?.stages) return 0;
-    const completed = enrichment.stages.filter(s => s.status === 'completed').length;
-    const hasInProgress = enrichment.stages.some(s => s.status === 'in_progress');
-    return Math.min(100, ((completed + (hasInProgress ? 0.5 : 0)) / (enrichment.stages?.length || 5)) * 100);
+    const stages = enrichment?.stages;
+    if (!enrichment || !stages?.length) return 0;
+    const completed = stages.filter(s => s.status === 'completed').length;
+    const active = stages.find(s => s.status === 'in_progress');
+    let fraction = 0;
+    if (active) {
+      const eligible = getStageEligible(active.stage, enrichment);
+      const done = active.stage === 5 ? (active.validated ?? 0) : (active.enriched ?? 0);
+      fraction = eligible > 0 ? Math.max(0, Math.min(1, done / eligible)) : 0;
+    }
+    return Math.min(100, ((completed + fraction) / stages.length) * 100);
   };
 
   const renderBatchInfo = (
@@ -611,9 +632,23 @@ export default function Results() {
                     ? '(stopped)'
                     : isFailed
                       ? '(failed)'
-                      : enrichment.current_stage
-                        ? `(Stage ${enrichment.current_stage}/${enrichment.stages?.length || 5})`
-                        : '...'}
+                      : (() => {
+                          const active = enrichment.stages?.find(s => s.status === 'in_progress');
+                          if (!active) {
+                            return enrichment.current_stage
+                              ? `(Stage ${enrichment.current_stage}/${enrichment.stages?.length || 5})`
+                              : '...';
+                          }
+                          const eligible = getStageEligible(active.stage, enrichment);
+                          const done = active.stage === 5 ? (active.validated ?? 0) : (active.enriched ?? 0);
+                          const segs: string[] = [`· ${active.name}`];
+                          if (eligible > 0) segs.push(`${done.toLocaleString()}/${eligible.toLocaleString()} processed`);
+                          segs.push(`${(active.emails_found ?? 0).toLocaleString()} emails`);
+                          if ((active.findymail_credits ?? 0) > 0) segs.push(`${active.findymail_credits!.toLocaleString()} FM credits`);
+                          if ((active.wiza_credits ?? 0) > 0) segs.push(`${active.wiza_credits!.toLocaleString()} Wiza credits`);
+                          if ((active.bounceban_credits ?? 0) > 0) segs.push(`${active.bounceban_credits!.toLocaleString()} BB credits`);
+                          return segs.join(' · ');
+                        })()}
               </span>
               <span>
                 {enrichment.emails_found + (enrichment.late_wiza_emails_found ?? 0)} emails found
