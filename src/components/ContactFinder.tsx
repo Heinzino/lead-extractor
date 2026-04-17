@@ -17,7 +17,7 @@ type ContactFinderMode = 'match_and_enrich' | 'enrich_only';
 
 const HAS_SUPABASE = !!process.env.NEXT_PUBLIC_SUPABASE_URL;
 
-function saveBatchToLocalStorage(batch: { batch_id: string; file_name: string; created_at: string }) {
+function saveBatchToLocalStorage(batch: { batch_id: string; file_name: string; created_at: string; mode?: string }) {
   const key = 'matching_batches';
   const existing = JSON.parse(localStorage.getItem(key) || '[]');
   existing.unshift(batch);
@@ -268,6 +268,7 @@ export default function ContactFinder() {
           batch_id,
           file_name: effectiveFileName,
           created_at: new Date().toISOString(),
+          mode,
         });
       }
 
