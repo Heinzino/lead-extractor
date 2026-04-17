@@ -62,6 +62,7 @@ interface SkipSummary {
 interface BatchStatus {
   batch_id: string;
   status: string;
+  mode?: 'match_and_enrich' | 'enrich_only';
   created_at?: string;
   enqueued_at?: string;
   completed_at?: string;
@@ -98,6 +99,15 @@ interface BatchStatus {
 type EnrichResultWithBatch = EnrichResult & { type: 'enrich'; batchStatus?: BatchStatus };
 type SerperResultWithType = SerperResult & { type: 'serper' };
 type Result = SerperResultWithType | EnrichResultWithBatch;
+
+function resolveResultCount(
+  mode: string | undefined,
+  batchStatus: Pick<BatchStatus, 'matching' | 'enrichment'> | null | undefined,
+): number {
+  if (!batchStatus) return 0;
+  if (mode === 'enrich_only') return batchStatus.enrichment?.total ?? 0;
+  return batchStatus.matching?.total_matches ?? 0;
+}
 
 export default function Results() {
   const [serperResults, setSerperResults] = useState<SerperResultWithType[]>([]);
@@ -187,35 +197,54 @@ export default function Results() {
             status: result.status as 'RUNNING' | 'DONE' | 'ERROR' | 'ABORTED',
           };
           const batchStatus = await fetchBatchStatus(result.id);
-          if (batchStatus) {
-            enrichItem.batchStatus = batchStatus;
-            if (result.status === 'RUNNING') {
-              if (batchStatus.status === 'COMPLETED') {
-                enrichItem.status = 'DONE';
-                enrichItem.result_count = batchStatus.matching?.total_matches || 0;
-                await supabase.from('enrich_results').update({
-                  status: 'DONE',
-                  result_count: batchStatus.matching?.total_matches || 0,
-                  updated_at: new Date().toISOString(),
-                }).eq('id', result.id);
-              } else if (batchStatus.status === 'FAILED') {
-                enrichItem.status = 'ERROR';
-              } else if (batchStatus.status === 'ABORTED') {
-                enrichItem.status = 'ABORTED';
-                await supabase.from('enrich_results').update({
-                  status: 'ABORTED',
-                  result_count: batchStatus.matching?.total_matches || 0,
-                  updated_at: new Date().toISOString(),
-                }).eq('id', result.id);
-              }
+          if (!batchStatus) return enrichItem;
+
+          enrichItem.batchStatus = batchStatus;
+          const mode = result.mode ?? batchStatus.mode;
+
+          if (result.status === 'RUNNING') {
+            if (batchStatus.status === 'COMPLETED') {
+              const count = resolveResultCount(mode, batchStatus);
+              enrichItem.status = 'DONE';
+              enrichItem.result_count = count;
+              await supabase.from('enrich_results').update({
+                status: 'DONE',
+                result_count: count,
+                updated_at: new Date().toISOString(),
+              }).eq('id', result.id);
+            } else if (batchStatus.status === 'FAILED') {
+              enrichItem.status = 'ERROR';
+            } else if (batchStatus.status === 'ABORTED') {
+              const count = resolveResultCount(mode, batchStatus);
+              enrichItem.status = 'ABORTED';
+              enrichItem.result_count = count;
+              await supabase.from('enrich_results').update({
+                status: 'ABORTED',
+                result_count: count,
+                updated_at: new Date().toISOString(),
+              }).eq('id', result.id);
+            }
+          } else if (
+            (result.status === 'DONE' || result.status === 'ABORTED') &&
+            mode === 'enrich_only' &&
+            (result.result_count == null || result.result_count === 0)
+          ) {
+            const healed = resolveResultCount('enrich_only', batchStatus);
+            if (healed > 0) {
+              enrichItem.result_count = healed;
+              await supabase.from('enrich_results').update({
+                result_count: healed,
+                updated_at: new Date().toISOString(),
+              }).eq('id', result.id);
             }
           }
+
           return enrichItem;
         })
       );
     } else {
       const stored = JSON.parse(localStorage.getItem('matching_batches') || '[]') as {
-        batch_id: string; file_name: string; created_at: string; status?: string;
+        batch_id: string; file_name: string; created_at: string; status?: string; mode?: string;
       }[];
 
       enrichWithStatus = await Promise.all(
@@ -231,12 +260,14 @@ export default function Results() {
             s.status = status;
           }
 
+          const mode = s.mode ?? batchStatus?.mode;
           const item: EnrichResultWithBatch = {
             id: s.batch_id,
             user_id: 'local',
             file_name: s.file_name,
             status: status as 'RUNNING' | 'DONE' | 'ERROR' | 'ABORTED',
-            result_count: batchStatus?.matching?.total_matches,
+            mode: mode as EnrichResult['mode'],
+            result_count: resolveResultCount(mode, batchStatus),
             created_at: s.created_at,
             updated_at: s.created_at,
             type: 'enrich' as const,
@@ -901,7 +932,7 @@ export default function Results() {
             )}
             {(result.status === 'DONE' || canDownload) && (
               <>
-                {result.result_count === 0 && result.status === 'DONE' ? (
+                {result.result_count === 0 && result.status === 'DONE' && result.mode !== 'enrich_only' ? (
                   <div className="text-sm text-gray-500">
                     <p>No results found.</p>
                   </div>
