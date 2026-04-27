@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { parse } from 'csv-parse/sync';
-import { X, Download, FileText, RefreshCw } from 'lucide-react';
+import { X, Download, FileText } from 'lucide-react';
 import Button from './Button';
 import Toast from './Toast';
 import FileUploaderBox from './FileUploaderBox';
@@ -12,25 +12,8 @@ import { MATCHING_FIELDS, ENRICHMENT_FIELDS } from '../lib/fieldConfigs';
 import { transformEnrichmentCsv } from '../lib/csvTransform';
 
 const PREVIEW_ROW_LIMIT = 10;
-const RELOAD_POLL_INTERVAL_MS = 60_000;
 
 type ContactFinderMode = 'match_and_enrich' | 'enrich_only';
-
-// Backend payload shape returned with HTTP 503 when the LinkedIn index is
-// being rebuilt. See opensearch/src/api/batch_submit.py:_reload_503.
-type IndexReloadPayload = {
-  state: 'INDEX_RELOAD';
-  reload_month: string | null;
-  current_step: string | null;
-  started_at: string;
-  elapsed_min: number | null;
-  docs_indexed_so_far: number;
-  baseline_runtime_min: number | null;
-  pct_complete: number | null;
-  eta_min: number | null;
-  last_progress_at: string | null;
-  message: string;
-};
 
 const HAS_SUPABASE = !!process.env.NEXT_PUBLIC_SUPABASE_URL;
 
@@ -60,23 +43,11 @@ export default function ContactFinder() {
   const [toastType, setToastType] = useState<'error' | 'success'>('success');
   const [hasUploadError, setHasUploadError] = useState(false);
 
-  // Monthly LinkedIn-reload gate. When the backend returns 503 INDEX_RELOAD
-  // we surface a banner with the live reload progress and let the user
-  // retry. The cached request body lets us re-issue the same POST without
-  // re-running presign + S3 upload (the file is already in S3 under the
-  // original csv_s3_key).
-  const [reloadStatus, setReloadStatus] = useState<IndexReloadPayload | null>(null);
-  const pendingSubmitBodyRef = useRef<unknown | null>(null);
-  const pendingBatchIdRef = useRef<string | null>(null);
-  const pendingFileNameRef = useRef<string | null>(null);
-  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   // Tab switch resets all upload state so a half-mapped file from one mode
   // doesn't leak into the other.
   const switchMode = useCallback((next: ContactFinderMode) => {
     if (next === mode) return;
     if (isSubmitting) return; // tab buttons are also disabled in JSX, but guard here too
-    if (reloadStatus) return; // banner active — don't switch tabs mid-wait
     setMode(next);
     setFile(null);
     setCsvHeaders([]);
@@ -90,105 +61,7 @@ export default function ContactFinder() {
     setHasUploadError(false);
     setIsSubmitting(false);
     setShowToast(false);
-  }, [mode, isSubmitting, reloadStatus]);
-
-  const finishSubmit = useCallback(async (batchId: string, effectiveFileName: string) => {
-    if (!user) return;
-    if (HAS_SUPABASE) {
-      await supabase.from('enrich_results').insert({
-        id: batchId,
-        user_id: user.id,
-        file_name: effectiveFileName,
-        status: 'RUNNING',
-        mode,
-        result_count: 0,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
-    } else {
-      saveBatchToLocalStorage({
-        batch_id: batchId,
-        file_name: effectiveFileName,
-        created_at: new Date().toISOString(),
-        mode,
-      });
-    }
-    window.location.href = `/?page=Results&status=processing&batchId=${batchId}`;
-  }, [user, mode]);
-
-  // POSTs the cached request body. Used both by the retry button and the
-  // 60-second auto-poll. Returns true when a batch successfully started so
-  // the caller can stop polling.
-  const attemptStart = useCallback(async (): Promise<boolean> => {
-    const body = pendingSubmitBodyRef.current;
-    const batchId = pendingBatchIdRef.current;
-    const effectiveFileName = pendingFileNameRef.current;
-    if (!body || !batchId || !effectiveFileName) return false;
-
-    try {
-      const startRes = await fetch('/api/matching', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      if (startRes.status === 503) {
-        const payload = await startRes.json().catch(() => null);
-        if (payload && payload.state === 'INDEX_RELOAD') {
-          setReloadStatus(payload as IndexReloadPayload);
-          return false;
-        }
-        // Some other 503 — treat as transient error.
-        setReloadStatus(null);
-        setToastMessage(payload?.error || payload?.message || 'Service temporarily unavailable');
-        setToastType('error');
-        setShowToast(true);
-        return false;
-      }
-
-      if (!startRes.ok) {
-        const error = await startRes.json().catch(() => ({}));
-        setReloadStatus(null);
-        setToastMessage(error.error || error.message || 'Failed to start pipeline');
-        setToastType('error');
-        setShowToast(true);
-        return false;
-      }
-
-      // Success — clear the gate and finish the original flow.
-      setReloadStatus(null);
-      await finishSubmit(batchId, effectiveFileName);
-      return true;
-    } catch (e) {
-      setToastMessage(e instanceof Error ? e.message : 'Network error');
-      setToastType('error');
-      setShowToast(true);
-      return false;
-    }
-  }, [finishSubmit]);
-
-  // Auto-poll while the INDEX_RELOAD banner is showing so eta_min /
-  // pct_complete stay current. Re-issuing the same POST is safe: while the
-  // gate is active it returns another 503 (no batch row created); once the
-  // reload completes the next poll succeeds and the user is redirected.
-  useEffect(() => {
-    if (!reloadStatus) {
-      if (pollTimerRef.current) {
-        clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
-      return;
-    }
-    pollTimerRef.current = setInterval(() => {
-      void attemptStart();
-    }, RELOAD_POLL_INTERVAL_MS);
-    return () => {
-      if (pollTimerRef.current) {
-        clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
-    };
-  }, [reloadStatus, attemptStart]);
+  }, [mode, isSubmitting]);
 
   const handleFileUpload = useCallback(async (uploadedFile: File) => {
     if (!uploadedFile.name.endsWith('.csv')) {
@@ -367,35 +240,42 @@ export default function ContactFinder() {
               field_mapping: effectiveFieldMapping,
             };
 
-      // Cache for retry / auto-poll. The presigned upload has already
-      // happened; if the start call gets 503'd we don't want to re-upload.
-      pendingSubmitBodyRef.current = requestBody;
-      pendingBatchIdRef.current = batch_id;
-      pendingFileNameRef.current = effectiveFileName;
-
       const startRes = await fetch('/api/matching', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
       });
 
-      if (startRes.status === 503) {
-        const payload = await startRes.json().catch(() => null);
-        if (payload && payload.state === 'INDEX_RELOAD') {
-          setReloadStatus(payload as IndexReloadPayload);
-          return; // finally block clears isSubmitting; banner takes over
-        }
-        throw new Error(payload?.error || payload?.message || 'Service temporarily unavailable');
-      }
-
       if (!startRes.ok) {
-        const error = await startRes.json();
+        const error = await startRes.json().catch(() => ({}));
         console.error('Start pipeline error:', startRes.status, error);
         throw new Error(error.error || error.message || JSON.stringify(error));
       }
 
-      // Step 4: Store batch reference and redirect.
-      await finishSubmit(batch_id, effectiveFileName);
+      // Step 4: Persist a local pointer to the batch and redirect to
+      // Results. The Results page reads `linkedin_reload_status` via the
+      // batch-status endpoint and shows reload progress for QUEUED rows,
+      // so we don't need to discriminate "queued behind reload" here.
+      if (HAS_SUPABASE) {
+        await supabase.from('enrich_results').insert({
+          id: batch_id,
+          user_id: user.id,
+          file_name: effectiveFileName,
+          status: 'RUNNING',
+          mode,
+          result_count: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      } else {
+        saveBatchToLocalStorage({
+          batch_id,
+          file_name: effectiveFileName,
+          created_at: new Date().toISOString(),
+          mode,
+        });
+      }
+      window.location.href = `/?page=Results&status=processing&batchId=${batch_id}`;
     } catch (error) {
       console.error('Error:', error);
       setToastMessage(error instanceof Error ? error.message : 'An error occurred');
@@ -405,15 +285,6 @@ export default function ContactFinder() {
       setIsSubmitting(false);
     }
   };
-
-  const handleManualRetry = useCallback(async () => {
-    setIsSubmitting(true);
-    try {
-      await attemptStart();
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [attemptStart]);
 
   const closeToast = useCallback(() => {
     setShowToast(false);
@@ -438,72 +309,11 @@ export default function ContactFinder() {
         </p>
       </div>
 
-      {reloadStatus && (
-        <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-4 text-amber-900">
-          <div className="flex items-start gap-3">
-            <RefreshCw className="mt-0.5 h-5 w-5 flex-shrink-0 animate-spin text-amber-600" />
-            <div className="flex-1 space-y-2">
-              <div className="font-medium">
-                Matching index is being rebuilt with the latest LinkedIn data
-              </div>
-              <p className="text-sm text-amber-800">{reloadStatus.message}</p>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-amber-800 md:grid-cols-4">
-                {reloadStatus.current_step && (
-                  <div>
-                    <span className="text-amber-700">Step:</span>{' '}
-                    <span className="font-mono">{reloadStatus.current_step}</span>
-                  </div>
-                )}
-                {reloadStatus.elapsed_min !== null && (
-                  <div>
-                    <span className="text-amber-700">Elapsed:</span>{' '}
-                    {reloadStatus.elapsed_min} min
-                  </div>
-                )}
-                {reloadStatus.eta_min !== null && (
-                  <div>
-                    <span className="text-amber-700">ETA:</span>{' '}
-                    ~{reloadStatus.eta_min} min
-                  </div>
-                )}
-                {reloadStatus.pct_complete !== null && (
-                  <div>
-                    <span className="text-amber-700">Progress:</span>{' '}
-                    {reloadStatus.pct_complete}%
-                  </div>
-                )}
-              </div>
-              {reloadStatus.pct_complete !== null && (
-                <div className="h-2 w-full overflow-hidden rounded bg-amber-100">
-                  <div
-                    className="h-full bg-amber-500 transition-all"
-                    style={{ width: `${Math.min(100, Math.max(0, reloadStatus.pct_complete))}%` }}
-                  />
-                </div>
-              )}
-              <div className="flex items-center justify-between gap-3 pt-1 text-xs text-amber-700">
-                <div>
-                  Polling every {RELOAD_POLL_INTERVAL_MS / 1000}s. Your file is already uploaded — we&apos;ll resume automatically.
-                </div>
-                <button
-                  type="button"
-                  onClick={handleManualRetry}
-                  disabled={isSubmitting}
-                  className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Retry now
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="flex gap-2 mb-5 border-b border-gray-200">
         <button
           type="button"
           onClick={() => switchMode('match_and_enrich')}
-          disabled={isSubmitting || !!reloadStatus}
+          disabled={isSubmitting}
           className={`px-4 py-2 text-sm font-medium transition-colors -mb-px ${
             mode === 'match_and_enrich'
               ? 'border-b-2 border-blue-600 text-blue-600'
@@ -515,7 +325,7 @@ export default function ContactFinder() {
         <button
           type="button"
           onClick={() => switchMode('enrich_only')}
-          disabled={isSubmitting || !!reloadStatus}
+          disabled={isSubmitting}
           className={`px-4 py-2 text-sm font-medium transition-colors -mb-px ${
             mode === 'enrich_only'
               ? 'border-b-2 border-blue-600 text-blue-600'
@@ -724,7 +534,7 @@ export default function ContactFinder() {
               const event = new Event('submit') as unknown as React.FormEvent;
               handleSubmit(event);
             }}
-            disabled={isSubmitting || hasUploadError || !fieldMapping || !!reloadStatus}
+            disabled={isSubmitting || hasUploadError || !fieldMapping}
             isLoading={isSubmitting}
           />
         </div>

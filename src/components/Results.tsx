@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Clock, CheckCircle, XCircle, Ban, Download, ChevronDown, ChevronUp } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, Ban, Download, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase/supabaseClient';
 import Toast from './Toast';
 
@@ -59,6 +59,23 @@ interface SkipSummary {
   };
 }
 
+// Monthly LinkedIn full-reload context, attached to GET /batches/{id}
+// only while the batch is QUEUED and a reload SFN is IN_PROGRESS. Mirrors
+// the body that batch-status builds in _build_reload_block.
+interface ReloadProgress {
+  state: 'INDEX_RELOAD';
+  reload_month: string | null;
+  current_step: string | null;
+  started_at: string;
+  elapsed_min: number | null;
+  docs_indexed_so_far: number;
+  baseline_runtime_min: number | null;
+  pct_complete: number | null;
+  eta_min: number | null;
+  last_progress_at: string | null;
+  message: string;
+}
+
 interface BatchStatus {
   batch_id: string;
   status: string;
@@ -68,6 +85,7 @@ interface BatchStatus {
   completed_at?: string;
   job_titles?: string;
   enrich_emails?: boolean;
+  reload?: ReloadProgress;
   matching?: {
     total_rows: number;
     processed_rows: number;
@@ -595,14 +613,74 @@ export default function Results() {
     const isExpanded = expandedId === resultId;
 
     if (status === 'QUEUED') {
+      const reload = batchStatus.reload;
+      if (!reload) {
+        return (
+          <div className="mt-3">
+            <span className="text-xs text-gray-500">
+              Queued
+              {batchStatus.enqueued_at
+                ? ` — waiting since ${formatTime(batchStatus.enqueued_at)}`
+                : ''}
+            </span>
+          </div>
+        );
+      }
+      // Queued behind a monthly LinkedIn full-reload: show progress so the
+      // user knows why their batch hasn't started and roughly when it will.
+      // The dispatcher promotes QUEUED → PENDING automatically once the
+      // reload SFN completes (EventBridge), so no manual action is needed.
+      const pct = reload.pct_complete;
       return (
-        <div className="mt-3">
-          <span className="text-xs text-gray-500">
-            Queued
-            {batchStatus.enqueued_at
-              ? ` — waiting since ${formatTime(batchStatus.enqueued_at)}`
-              : ''}
-          </span>
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-amber-900">
+          <div className="flex items-start gap-3">
+            <RefreshCw className="mt-0.5 h-4 w-4 flex-shrink-0 animate-spin text-amber-600" />
+            <div className="flex-1 space-y-2">
+              <div className="text-sm font-medium">
+                Matching index is being rebuilt with the latest LinkedIn data
+              </div>
+              <p className="text-xs text-amber-800">{reload.message}</p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-amber-800 md:grid-cols-4">
+                {reload.current_step && (
+                  <div>
+                    <span className="text-amber-700">Step:</span>{' '}
+                    <span className="font-mono">{reload.current_step}</span>
+                  </div>
+                )}
+                {reload.elapsed_min !== null && (
+                  <div>
+                    <span className="text-amber-700">Elapsed:</span>{' '}
+                    {reload.elapsed_min} min
+                  </div>
+                )}
+                {reload.eta_min !== null && (
+                  <div>
+                    <span className="text-amber-700">ETA:</span>{' '}
+                    ~{reload.eta_min} min
+                  </div>
+                )}
+                {pct !== null && (
+                  <div>
+                    <span className="text-amber-700">Progress:</span> {pct}%
+                  </div>
+                )}
+              </div>
+              {pct !== null && (
+                <div className="h-2 w-full overflow-hidden rounded bg-amber-100">
+                  <div
+                    className="h-full bg-amber-500 transition-all"
+                    style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                  />
+                </div>
+              )}
+              <div className="pt-0.5 text-xs text-amber-700">
+                Your file is uploaded — processing will start automatically when the rebuild finishes.
+                {batchStatus.enqueued_at && (
+                  <> Queued at {formatTime(batchStatus.enqueued_at)}.</>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       );
     }
