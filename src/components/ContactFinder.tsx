@@ -6,6 +6,7 @@ import Toast from './Toast';
 import FileUploaderBox from './FileUploaderBox';
 import FieldMapper from './FieldMapper';
 import CsvPreviewTable from './CsvPreviewTable';
+import CountryMultiSelect from './CountryMultiSelect';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase/supabaseClient';
 import { MATCHING_FIELDS, ENRICHMENT_FIELDS } from '../lib/fieldConfigs';
@@ -35,6 +36,7 @@ export default function ContactFinder() {
   const [isUploading, setIsUploading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [jobTitles, setJobTitles] = useState('');
+  const [countries, setCountries] = useState<string[]>([]);
   const [fileName, setFileName] = useState('');
   const [enrichEmails, setEnrichEmails] = useState(false);
   const [maxMatchesPerBusiness, setMaxMatchesPerBusiness] = useState<number | ''>(20);
@@ -55,6 +57,7 @@ export default function ContactFinder() {
     setTotalRowCount(0);
     setFieldMapping(null);
     setJobTitles('');
+    setCountries([]);
     setEnrichEmails(false);
     setMaxMatchesPerBusiness(20);
     setFileName('');
@@ -238,6 +241,7 @@ export default function ContactFinder() {
                   ? 20
                   : Math.min(20, Math.max(1, maxMatchesPerBusiness)),
               field_mapping: effectiveFieldMapping,
+              ...(countries.length > 0 ? { countries } : {}),
             };
 
       const startRes = await fetch('/api/matching', {
@@ -440,6 +444,18 @@ export default function ContactFinder() {
               />
               <p className="mt-1 text-xs text-gray-400">
                 Enter comma separated job titles
+              </p>
+            </div>
+          )}
+
+          {mode === 'match_and_enrich' && (
+            <div>
+              <label className="block text-sm text-gray-500 mb-1.5">
+                Countries (optional)
+              </label>
+              <CountryMultiSelect value={countries} onChange={setCountries} />
+              <p className="mt-1 text-xs text-gray-400">
+                Restrict matches to LinkedIn profiles in the selected countries. Leave empty to search all.
               </p>
             </div>
           )}

@@ -84,6 +84,7 @@ interface BatchStatus {
   enqueued_at?: string;
   completed_at?: string;
   job_titles?: string;
+  countries?: string[];
   enrich_emails?: boolean;
   reload?: ReloadProgress;
   matching?: {
@@ -897,6 +898,9 @@ export default function Results() {
           <div className="text-xs text-gray-400 space-y-1 pl-4 border-l-2 border-gray-100">
             <p>Batch ID: <span className="font-mono">{batchStatus.batch_id}</span></p>
             {batchStatus.job_titles && <p>Job titles: {batchStatus.job_titles}</p>}
+            {batchStatus.countries && batchStatus.countries.length > 0 && (
+              <p>Countries: {batchStatus.countries.join(', ')}</p>
+            )}
             {enrichment && <p>Email enrichment: enabled ({enrichment.total} candidates, {enrichment.emails_found} emails found)</p>}
             {!enrichment && <p>Email enrichment: not requested</p>}
           </div>
