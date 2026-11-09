@@ -1,6 +1,56 @@
-import type { SerperPlace, SerperQueryRow, SerperResponse } from './types';
+import type { SerperPlace, SerperQueryRow } from './types';
 import { serperConfig } from './config';
 import { normalizeText, chunk } from './utils';
+
+const MAPS_URL = 'https://api.litescrape.com/api/google/maps';
+
+function mapPlace(raw: Record<string, unknown>): Record<string, unknown> {
+    const gps = (raw.gps_coordinates || {}) as { latitude?: number; longitude?: number };
+    const cid = raw.data_cid ?? raw.cid;
+    return {
+        title: raw.title ?? '',
+        address: raw.address ?? '',
+        website: raw.website ?? '',
+        phoneNumber: raw.phone ?? raw.phoneNumber ?? '',
+        category: raw.type ?? raw.category ?? '',
+        rating: raw.rating,
+        ratingCount: raw.reviews ?? raw.ratingCount,
+        latitude: raw.latitude ?? gps.latitude,
+        longitude: raw.longitude ?? gps.longitude,
+        cid: cid == null ? undefined : String(cid),
+        position: raw.position
+    };
+}
+
+async function fetchMaps(payload: Record<string, unknown>): Promise<{ ok: boolean; places: Record<string, unknown>[] }> {
+    let delay = 1000;
+    for (let attempt = 0; attempt < 4; attempt++) {
+        const response = await fetch(MAPS_URL, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${process.env.LITESCRAPE_API_KEY || ''}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+            const data = await response.json() as { local_results?: Record<string, unknown>[] };
+            const rawPlaces = Array.isArray(data.local_results) ? data.local_results : [];
+            return { ok: true, places: rawPlaces.map(mapPlace) };
+        }
+
+        const retry = response.status === 429 || response.status >= 500;
+        const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+        if (!retry || attempt === 3) {
+            console.error(`❌ LiteScrape error:`, errorData);
+            return { ok: false, places: [] };
+        }
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay = Math.min(delay * 2, 20000);
+    }
+    return { ok: false, places: [] };
+}
 
 async function fetchPlaces(row: SerperQueryRow): Promise<{ places: SerperPlace[], creditsUsed: number }> {
     const searchTerm = `${normalizeText(row.query)} in ${normalizeText(row.city)} ${row.zip}`;
@@ -9,38 +59,29 @@ async function fetchPlaces(row: SerperQueryRow): Promise<{ places: SerperPlace[]
     let creditsUsed = 0;
 
     while (page <= serperConfig.maxPages) {
-        const payload = {
+        const payload: Record<string, unknown> = {
             q: searchTerm,
-            location: row.zip,
-            ...(page > 1 ? { page } : {})
+            type: 'search',
+            hl: 'en',
+            gl: 'us',
+            ...(page > 1 ? { start: (page - 1) * serperConfig.pageSize } : {})
         };
 
-        try {            
-            const response = await fetch('https://google.serper.dev/places', {
-                method: 'POST',
-                headers: {
-                    'X-API-KEY': process.env.SERP_API_KEY || '',
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
-            });
+        try {
+            const { ok, places } = await fetchMaps(payload);
 
-            creditsUsed++;
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
-                console.error(`❌ Error on page ${page}:`, errorData);
+            if (!ok) {
                 break;
             }
 
-            const data = await response.json() as SerperResponse;
-            const places = data.places || [];
+            creditsUsed++;
 
             if (!places.length) {
                 break;
             }
 
             for (const place of places) {
+                const cid = typeof place.cid === 'string' ? place.cid : '';
                 const entry: SerperPlace = {
                     ...place,
                     query: normalizeText(row.query),
@@ -48,9 +89,9 @@ async function fetchPlaces(row: SerperQueryRow): Promise<{ places: SerperPlace[]
                     zip: row.zip,
                     search_term: searchTerm,
                     page: page,
-                    is_valid: place.cid ? 'true' : 'false',
-                    maps_url: place.cid ? `https://www.google.com/maps?cid=${place.cid}` : '',
-                    cid: place.cid ? `'${place.cid}` : undefined
+                    is_valid: cid ? 'true' : 'false',
+                    maps_url: cid ? `https://www.google.com/maps?cid=${cid}` : '',
+                    cid: cid ? `'${cid}` : undefined
                 };
                 Object.keys(entry).forEach(key => {
                     const value = entry[key];
@@ -61,7 +102,7 @@ async function fetchPlaces(row: SerperQueryRow): Promise<{ places: SerperPlace[]
                 collected.push(entry);
             }
 
-            if (places.length < 10) {
+            if (places.length < serperConfig.pageSize) {
                 break;
             }
 

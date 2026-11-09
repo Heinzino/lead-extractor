@@ -25,4 +25,5 @@ export interface SerperConfig {
     maxWorkers: number;
     batchDelay: number;
     maxPages: number;
+    pageSize: number;
 } 
