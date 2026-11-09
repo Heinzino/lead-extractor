@@ -1,50 +1,102 @@
 import type { SerperPlace, SerperQueryRow } from './types';
 import { serperConfig } from './config';
 import { normalizeText, chunk } from './utils';
+import centroidFile from '../../../data/zip-centroids.json';
 
-const MAPS_URL = 'https://api.litescrape.com/api/google/maps';
+const MAPS_URL = 'https://api.scraper.tech/searchmaps.php';
+const ZOOM = '14';
+const centroids = centroidFile as unknown as Record<string, [number, number]>;
 
-function mapPlace(raw: Record<string, unknown>): Record<string, unknown> {
-    const gps = (raw.gps_coordinates || {}) as { latitude?: number; longitude?: number };
-    const cid = raw.data_cid ?? raw.cid;
+function centroidFor(zip: string): [number, number] | undefined {
+    return centroids[zip.trim().padStart(5, '0')];
+}
+
+function cidOf(place: Record<string, unknown>): string | undefined {
+    const businessId = String(place.business_id || '');
+    const hex = businessId.includes(':') ? businessId.split(':').pop() || '' : '';
+    const digits = hex.startsWith('0x') ? hex.slice(2) : hex;
+    if (/^[0-9a-fA-F]+$/.test(digits)) {
+        return BigInt(`0x${digits}`).toString(10);
+    }
+    if (place.cid != null && place.cid !== '') {
+        return String(place.cid);
+    }
+    return undefined;
+}
+
+function addressOf(place: Record<string, unknown>): string {
+    const name = String(place.name || '');
+    let address = String(place.full_address || '');
+    if (name && address.toLowerCase().startsWith(name.toLowerCase())) {
+        address = address.slice(name.length).replace(/^[\s,]+/, '');
+    }
+    return address;
+}
+
+function mapPlace(raw: Record<string, unknown>, position: number): Record<string, unknown> {
+    const types = Array.isArray(raw.types) ? raw.types.map(item => String(item)) : [];
     return {
-        title: raw.title ?? '',
-        address: raw.address ?? '',
+        title: raw.name ?? '',
+        address: addressOf(raw),
         website: raw.website ?? '',
-        phoneNumber: raw.phone ?? raw.phoneNumber ?? '',
-        category: raw.type ?? raw.category ?? '',
+        phoneNumber: raw.phone_number ?? '',
+        category: types[0] ?? '',
         rating: raw.rating,
-        ratingCount: raw.reviews ?? raw.ratingCount,
-        latitude: raw.latitude ?? gps.latitude,
-        longitude: raw.longitude ?? gps.longitude,
-        cid: cid == null ? undefined : String(cid),
-        position: raw.position
+        ratingCount: raw.review_count,
+        latitude: raw.latitude,
+        longitude: raw.longitude,
+        cid: cidOf(raw),
+        position
     };
 }
 
-async function fetchMaps(payload: Record<string, unknown>): Promise<{ ok: boolean; places: Record<string, unknown>[] }> {
+export async function searchMapsPage(
+    query: string,
+    zip: string,
+    page = 1
+): Promise<{ ok: boolean; places: Record<string, unknown>[] }> {
+    const point = centroidFor(zip);
+    if (!point) {
+        console.error(`No map point for zip ${zip}`);
+        return { ok: false, places: [] };
+    }
+
+    const params = new URLSearchParams({
+        query,
+        limit: String(serperConfig.pageSize),
+        country: 'us',
+        lang: 'en',
+        lat: point[0].toFixed(6),
+        lng: point[1].toFixed(6),
+        offset: String(Math.max(page - 1, 0) * serperConfig.pageSize),
+        zoom: ZOOM
+    });
+
     let delay = 1000;
     for (let attempt = 0; attempt < 4; attempt++) {
-        const response = await fetch(MAPS_URL, {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${process.env.LITESCRAPE_API_KEY || ''}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
-        });
+        try {
+            const response = await fetch(`${MAPS_URL}?${params}`, {
+                method: 'GET',
+                headers: {
+                    'Scraper-Key': process.env.SCRAPER_TECH_API_KEY || ''
+                }
+            });
+            const data = await response.json().catch(() => null) as { status?: string; data?: Record<string, unknown>[] } | null;
+            if (response.ok && data?.status === 'ok') {
+                const rawPlaces = Array.isArray(data.data) ? data.data : [];
+                return { ok: true, places: rawPlaces.map((place, index) => mapPlace(place, index + 1)) };
+            }
 
-        if (response.ok) {
-            const data = await response.json() as { local_results?: Record<string, unknown>[] };
-            const rawPlaces = Array.isArray(data.local_results) ? data.local_results : [];
-            return { ok: true, places: rawPlaces.map(mapPlace) };
-        }
-
-        const retry = response.status === 429 || response.status >= 500;
-        const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
-        if (!retry || attempt === 3) {
-            console.error(`❌ LiteScrape error:`, errorData);
-            return { ok: false, places: [] };
+            const retry = response.status === 429 || response.status >= 500 || data?.status === 'failed';
+            if (!retry || attempt === 3) {
+                console.error('scraper.tech error:', data ?? response.status);
+                return { ok: false, places: [] };
+            }
+        } catch (error) {
+            if (attempt === 3) {
+                console.error('scraper.tech error:', error);
+                return { ok: false, places: [] };
+            }
         }
         await new Promise(resolve => setTimeout(resolve, delay));
         delay = Math.min(delay * 2, 20000);
@@ -59,16 +111,8 @@ async function fetchPlaces(row: SerperQueryRow): Promise<{ places: SerperPlace[]
     let creditsUsed = 0;
 
     while (page <= serperConfig.maxPages) {
-        const payload: Record<string, unknown> = {
-            q: searchTerm,
-            type: 'search',
-            hl: 'en',
-            gl: 'us',
-            ...(page > 1 ? { start: (page - 1) * serperConfig.pageSize } : {})
-        };
-
         try {
-            const { ok, places } = await fetchMaps(payload);
+            const { ok, places } = await searchMapsPage(searchTerm, row.zip, page);
 
             if (!ok) {
                 break;
@@ -108,7 +152,7 @@ async function fetchPlaces(row: SerperQueryRow): Promise<{ places: SerperPlace[]
 
             page++;
         } catch (error) {
-            console.error(`❌ Error on page ${page}:`, error);
+            console.error(`Error on page ${page}:`, error);
             break;
         }
     }
@@ -120,11 +164,11 @@ export async function runSerper(rows: SerperQueryRow[]): Promise<{ results: Serp
     const results: SerperPlace[] = [];
     const seenCids = new Set<string>();
     let totalCreditsUsed = 0;
-    
+
     if (process.env.NODE_ENV !== 'production') {
         rows = rows.slice(0, 10);
     }
-    
+
     const validRows = rows.filter(row => {
         const hasMeaningfulContent = (value: string): boolean => {
             const lettersOnly = value.replace(/[^a-zA-Z]/g, '');
@@ -132,22 +176,22 @@ export async function runSerper(rows: SerperQueryRow[]): Promise<{ results: Serp
         };
         return hasMeaningfulContent(row.query) && hasMeaningfulContent(row.city) && !!row.zip;
     });
-    
+
     if (validRows.length === 0) {
         console.warn('No valid rows found after filtering.');
         return { results: [], creditsUsed: 0 };
     }
-    
+
     const chunks = chunk(validRows, serperConfig.maxWorkers);
 
-    for (const chunk of chunks) {
-        const chunkPromises = chunk.map(async (row: SerperQueryRow) => {
+    for (const batch of chunks) {
+        const chunkPromises = batch.map(async (row: SerperQueryRow) => {
             const { places, creditsUsed } = await fetchPlaces(row);
             totalCreditsUsed += creditsUsed;
             return places;
         });
         const chunkResults = await Promise.all(chunkPromises);
-        
+
         chunkResults
             .flat()
             .filter((entry: SerperPlace | null): entry is SerperPlace => entry !== null)
@@ -162,4 +206,4 @@ export async function runSerper(rows: SerperQueryRow[]): Promise<{ results: Serp
     }
 
     return { results, creditsUsed: totalCreditsUsed };
-} 
+}
